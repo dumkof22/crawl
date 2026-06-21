@@ -1,0 +1,706 @@
+<!DOCTYPE html>
+<html lang="tr">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Panel - Mind Turkish Addons</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            min-height: 100vh;
+            padding: 20px;
+            color: #fff;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 40px;
+        }
+
+        header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+        }
+
+        .back-btn {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background: rgba(255, 255, 255, 0.2);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 10px;
+            text-decoration: none;
+            transition: all 0.3s ease;
+        }
+
+        .back-btn:hover {
+            background: rgba(255, 255, 255, 0.3);
+        }
+
+        /* Login Screen */
+        #loginScreen {
+            max-width: 400px;
+            margin: 100px auto;
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            padding: 40px;
+            border-radius: 20px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        #loginScreen h2 {
+            margin-bottom: 30px;
+            text-align: center;
+            color: #ffd700;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            color: #ffd700;
+        }
+
+        .form-group input,
+        .form-group textarea,
+        .form-group select {
+            width: 100%;
+            padding: 12px;
+            border-radius: 10px;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            background: rgba(0, 0, 0, 0.3);
+            color: white;
+            font-size: 1rem;
+        }
+
+        .form-group textarea {
+            min-height: 150px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9rem;
+        }
+
+        .btn {
+            width: 100%;
+            padding: 12px 20px;
+            border-radius: 10px;
+            border: none;
+            font-weight: bold;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            transform: scale(1.02);
+            box-shadow: 0 6px 20px rgba(102, 126, 234, 0.6);
+        }
+
+        .btn-success {
+            background: linear-gradient(135deg, #4caf50 0%, #45a049 100%);
+            color: white;
+        }
+
+        .btn-success:hover {
+            transform: scale(1.02);
+        }
+
+        .btn-warning {
+            background: linear-gradient(135deg, #ff9800 0%, #f57c00 100%);
+            color: white;
+        }
+
+        .btn-warning:hover {
+            transform: scale(1.02);
+        }
+
+        .btn-danger {
+            background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%);
+            color: white;
+        }
+
+        .btn-danger:hover {
+            transform: scale(1.02);
+        }
+
+        .btn-secondary {
+            background: rgba(255, 255, 255, 0.2);
+            color: white;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+        }
+
+        .btn-secondary:hover {
+            background: rgba(255, 255, 255, 0.3);
+        }
+
+        /* Admin Panel */
+        #adminPanel {
+            display: none;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .stat-card {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            padding: 20px;
+            border-radius: 15px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            text-align: center;
+        }
+
+        .stat-card h3 {
+            font-size: 2rem;
+            color: #ffd700;
+            margin-bottom: 10px;
+        }
+
+        .stat-card p {
+            opacity: 0.9;
+        }
+
+        .control-panel {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            padding: 30px;
+            border-radius: 15px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            margin-bottom: 30px;
+        }
+
+        .control-panel h2 {
+            margin-bottom: 20px;
+            color: #ffd700;
+        }
+
+        .button-group {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .button-group .btn {
+            width: 100%;
+        }
+
+        .addons-section {
+            margin-top: 30px;
+        }
+
+        .addon-item {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            padding: 25px;
+            border-radius: 15px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            margin-bottom: 20px;
+        }
+
+        .addon-item.disabled {
+            opacity: 0.5;
+            border-color: rgba(255, 0, 0, 0.3);
+        }
+
+        .addon-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .addon-title {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .addon-title h3 {
+            color: #ffd700;
+            font-size: 1.5rem;
+        }
+
+        .addon-status {
+            padding: 5px 15px;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            font-weight: bold;
+        }
+
+        .addon-status.enabled {
+            background: rgba(76, 175, 80, 0.3);
+            color: #4caf50;
+        }
+
+        .addon-status.disabled {
+            background: rgba(244, 67, 54, 0.3);
+            color: #f44336;
+        }
+
+        .addon-body {
+            display: none;
+            padding-top: 20px;
+            border-top: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .addon-body.active {
+            display: block;
+        }
+
+        .toggle-btn {
+            background: rgba(255, 215, 0, 0.2);
+            color: #ffd700;
+            border: 1px solid rgba(255, 215, 0, 0.3);
+            padding: 8px 20px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: all 0.3s ease;
+        }
+
+        .toggle-btn:hover {
+            background: rgba(255, 215, 0, 0.3);
+        }
+
+        .toast {
+            position: fixed;
+            bottom: 30px;
+            right: 30px;
+            padding: 15px 25px;
+            border-radius: 10px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+            opacity: 0;
+            transform: translateY(50px);
+            transition: all 0.3s ease;
+            pointer-events: none;
+            z-index: 1000;
+            max-width: 300px;
+        }
+
+        .toast.show {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        .toast.success {
+            background: #4caf50;
+            color: white;
+        }
+
+        .toast.error {
+            background: #f44336;
+            color: white;
+        }
+
+        .toast.info {
+            background: #2196F3;
+            color: white;
+        }
+
+        .password-section {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            padding: 30px;
+            border-radius: 15px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            margin-bottom: 30px;
+        }
+
+        .password-section h2 {
+            margin-bottom: 20px;
+            color: #ffd700;
+        }
+
+        @media (max-width: 768px) {
+            .addon-header {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+
+            .button-group {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <a href="/" class="back-btn">← Ana Sayfa</a>
+
+    <div class="container">
+        <!-- Login Screen -->
+        <div id="loginScreen">
+            <h2>🔐 Yönetici Girişi</h2>
+            <div class="form-group">
+                <label>Şifre</label>
+                <input type="password" id="loginPassword" placeholder="Admin şifresini girin">
+            </div>
+            <button class="btn btn-primary" onclick="login()">Giriş Yap</button>
+            <p id="loginError" style="color: #f44336; margin-top: 15px; text-align: center; display: none;"></p>
+        </div>
+
+        <!-- Admin Panel -->
+        <div id="adminPanel">
+            <header>
+                <h1>🔐 Yönetici Paneli</h1>
+                <p>Mind Turkish Addons - Sistem Yönetimi</p>
+                <button class="btn btn-secondary" onclick="logout()"
+                    style="margin-top: 15px; max-width: 200px; margin-left: auto; margin-right: auto;">
+                    Çıkış Yap
+                </button>
+            </header>
+
+            <!-- Stats -->
+            <div class="stats-grid" id="statsGrid">
+                <div class="stat-card">
+                    <h3 id="totalAddons">-</h3>
+                    <p>Toplam Eklenti</p>
+                </div>
+                <div class="stat-card">
+                    <h3 id="enabledAddons">-</h3>
+                    <p>Aktif Eklenti</p>
+                </div>
+                <div class="stat-card">
+                    <h3 id="disabledAddons">-</h3>
+                    <p>Devre Dışı</p>
+                </div>
+            </div>
+
+            <!-- Control Panel -->
+            <div class="control-panel">
+                <h2>⚙️ Sistem Kontrolleri</h2>
+                <div class="button-group">
+                    <button class="btn btn-success" onclick="startAllAddons()">▶️ Tümünü Başlat</button>
+                    <button class="btn btn-warning" onclick="stopAllAddons()">⏸️ Tümünü Durdur</button>
+                    <button class="btn btn-danger" onclick="restartServer()">🔄 Sunucuyu Yeniden Başlat</button>
+                    <button class="btn btn-primary" onclick="refreshData()">🔃 Verileri Yenile</button>
+                </div>
+            </div>
+
+            <!-- Password Change -->
+            <div class="password-section">
+                <h2>🔑 Şifre Değiştir</h2>
+                <div class="form-group">
+                    <label>Yeni Şifre</label>
+                    <input type="password" id="newPassword" placeholder="Yeni admin şifresi (min 4 karakter)">
+                </div>
+                <button class="btn btn-primary" onclick="changePassword()">Şifreyi Güncelle</button>
+            </div>
+
+            <!-- Addons Section -->
+            <div class="addons-section">
+                <h2 style="color: #ffd700; margin-bottom: 20px;">📦 Eklenti Yönetimi</h2>
+                <div id="addonsList"></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="toast" id="toast"></div>
+
+    <script>
+        let adminPassword = '';
+        const API_BASE = '';
+
+        function showToast(message, type = 'success') {
+            const toast = document.getElementById('toast');
+            toast.textContent = message;
+            toast.className = `toast ${type} show`;
+            setTimeout(() => {
+                toast.classList.remove('show');
+            }, 3000);
+        }
+
+        async function login() {
+            const password = document.getElementById('loginPassword').value;
+            if (!password) {
+                document.getElementById('loginError').textContent = 'Lütfen şifre girin';
+                document.getElementById('loginError').style.display = 'block';
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_BASE}/api/admin/stats`, {
+                    headers: {
+                        'X-Admin-Password': password
+                    }
+                });
+
+                if (response.ok) {
+                    adminPassword = password;
+                    document.getElementById('loginScreen').style.display = 'none';
+                    document.getElementById('adminPanel').style.display = 'block';
+                    loadAdminData();
+                } else {
+                    document.getElementById('loginError').textContent = 'Hatalı şifre!';
+                    document.getElementById('loginError').style.display = 'block';
+                }
+            } catch (error) {
+                document.getElementById('loginError').textContent = 'Bağlantı hatası: ' + error.message;
+                document.getElementById('loginError').style.display = 'block';
+            }
+        }
+
+        function logout() {
+            adminPassword = '';
+            document.getElementById('loginPassword').value = '';
+            document.getElementById('loginScreen').style.display = 'block';
+            document.getElementById('adminPanel').style.display = 'none';
+        }
+
+        async function loadAdminData() {
+            try {
+                // Load stats
+                const statsResponse = await fetch(`${API_BASE}/api/admin/stats`, {
+                    headers: { 'X-Admin-Password': adminPassword }
+                });
+                const statsData = await statsResponse.json();
+
+                document.getElementById('totalAddons').textContent = statsData.stats.totalAddons;
+                document.getElementById('enabledAddons').textContent = statsData.stats.enabledAddons;
+                document.getElementById('disabledAddons').textContent = statsData.stats.disabledAddons;
+
+                // Load config
+                const configResponse = await fetch(`${API_BASE}/api/admin/config`, {
+                    headers: { 'X-Admin-Password': adminPassword }
+                });
+                const configData = await configResponse.json();
+
+                renderAddons(configData.config.addons, statsData.stats.addons);
+            } catch (error) {
+                showToast('Veri yükleme hatası: ' + error.message, 'error');
+            }
+        }
+
+        function renderAddons(addonsConfig, addonsInfo) {
+            const container = document.getElementById('addonsList');
+            container.innerHTML = '';
+
+            Object.keys(addonsInfo).forEach(addonId => {
+                const info = addonsInfo[addonId];
+                const config = addonsConfig[addonId] || {};
+                const enabled = config.enabled !== false;
+
+                const addonDiv = document.createElement('div');
+                addonDiv.className = `addon-item ${!enabled ? 'disabled' : ''}`;
+                addonDiv.innerHTML = `
+                    <div class="addon-header">
+                        <div class="addon-title">
+                            <h3>${info.name}</h3>
+                            <span class="addon-status ${enabled ? 'enabled' : 'disabled'}">
+                                ${enabled ? '✅ Aktif' : '❌ Devre Dışı'}
+                            </span>
+                        </div>
+                        <button class="toggle-btn" onclick="toggleAddon('${addonId}')">
+                            ⚙️ Ayarlar
+                        </button>
+                    </div>
+                    <div class="addon-body" id="body-${addonId}">
+                        <div class="form-group">
+                            <label>Durum</label>
+                            <select id="enabled-${addonId}">
+                                <option value="true" ${enabled ? 'selected' : ''}>Aktif</option>
+                                <option value="false" ${!enabled ? 'selected' : ''}>Devre Dışı</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Base URL</label>
+                            <input type="text" id="baseUrl-${addonId}" value="${config.baseUrl || ''}" placeholder="https://example.com">
+                        </div>
+                        <div class="form-group">
+                            <label>Headers (JSON Format)</label>
+                            <textarea id="headers-${addonId}" placeholder='{"User-Agent": "...", "Accept": "..."}'>${JSON.stringify(config.headers || {}, null, 2)}</textarea>
+                        </div>
+                        <div class="form-group">
+                            <label>Cookies (JSON Format)</label>
+                            <textarea id="cookies-${addonId}" placeholder='{"sessionId": "...", "token": "..."}'>${JSON.stringify(config.cookies || {}, null, 2)}</textarea>
+                        </div>
+                        <button class="btn btn-primary" onclick="saveAddonConfig('${addonId}')">💾 Kaydet</button>
+                    </div>
+                `;
+                container.appendChild(addonDiv);
+            });
+        }
+
+        function toggleAddon(addonId) {
+            const body = document.getElementById(`body-${addonId}`);
+            body.classList.toggle('active');
+        }
+
+        async function saveAddonConfig(addonId) {
+            const enabled = document.getElementById(`enabled-${addonId}`).value === 'true';
+            const baseUrl = document.getElementById(`baseUrl-${addonId}`).value;
+            const headersText = document.getElementById(`headers-${addonId}`).value;
+            const cookiesText = document.getElementById(`cookies-${addonId}`).value;
+
+            let headers, cookies;
+            try {
+                headers = headersText ? JSON.parse(headersText) : {};
+                cookies = cookiesText ? JSON.parse(cookiesText) : {};
+            } catch (error) {
+                showToast('JSON formatı hatalı: ' + error.message, 'error');
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_BASE}/api/admin/addon/${addonId}/config`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Admin-Password': adminPassword
+                    },
+                    body: JSON.stringify({ enabled, baseUrl, headers, cookies })
+                });
+
+                const data = await response.json();
+                if (data.success) {
+                    showToast(`${addonId} başarıyla güncellendi!`, 'success');
+                    setTimeout(() => loadAdminData(), 500);
+                } else {
+                    showToast('Hata: ' + data.message, 'error');
+                }
+            } catch (error) {
+                showToast('Kaydetme hatası: ' + error.message, 'error');
+            }
+        }
+
+        async function startAllAddons() {
+            if (!confirm('Tüm eklentiler başlatılsın mı?')) return;
+
+            try {
+                const response = await fetch(`${API_BASE}/api/admin/start`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Admin-Password': adminPassword
+                    }
+                });
+
+                const data = await response.json();
+                if (data.success) {
+                    showToast(data.message, 'success');
+                    setTimeout(() => loadAdminData(), 500);
+                }
+            } catch (error) {
+                showToast('Hata: ' + error.message, 'error');
+            }
+        }
+
+        async function stopAllAddons() {
+            if (!confirm('Tüm eklentiler durdurulsun mu?')) return;
+
+            try {
+                const response = await fetch(`${API_BASE}/api/admin/stop`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Admin-Password': adminPassword
+                    }
+                });
+
+                const data = await response.json();
+                if (data.success) {
+                    showToast(data.message, 'success');
+                    setTimeout(() => loadAdminData(), 500);
+                }
+            } catch (error) {
+                showToast('Hata: ' + error.message, 'error');
+            }
+        }
+
+        async function restartServer() {
+            if (!confirm('Sunucu yeniden başlatılacak. Emin misiniz?')) return;
+
+            try {
+                const response = await fetch(`${API_BASE}/api/admin/restart`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Admin-Password': adminPassword
+                    }
+                });
+
+                const data = await response.json();
+                if (data.success) {
+                    showToast(data.message, 'info');
+                    setTimeout(() => {
+                        showToast('Sayfa 5 saniye içinde yenilenecek...', 'info');
+                        setTimeout(() => location.reload(), 5000);
+                    }, 1000);
+                }
+            } catch (error) {
+                showToast('Hata: ' + error.message, 'error');
+            }
+        }
+
+        async function changePassword() {
+            const newPassword = document.getElementById('newPassword').value;
+            if (!newPassword || newPassword.length < 4) {
+                showToast('Şifre en az 4 karakter olmalıdır', 'error');
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_BASE}/api/admin/password`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Admin-Password': adminPassword
+                    },
+                    body: JSON.stringify({ newPassword })
+                });
+
+                const data = await response.json();
+                if (data.success) {
+                    adminPassword = newPassword;
+                    document.getElementById('newPassword').value = '';
+                    showToast(data.message, 'success');
+                }
+            } catch (error) {
+                showToast('Hata: ' + error.message, 'error');
+            }
+        }
+
+        function refreshData() {
+            loadAdminData();
+            showToast('Veriler yenilendi', 'success');
+        }
+
+        // Enter key support for login
+        document.getElementById('loginPassword').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                login();
+            }
+        });
+    </script>
+</body>
+
+</html>

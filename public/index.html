@@ -1,0 +1,818 @@
+<!DOCTYPE html>
+<html lang="tr">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mind Turkish Addons - Multi-Addon Server</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+            color: #fff;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 50px;
+            animation: fadeInDown 0.8s ease;
+        }
+
+        header h1 {
+            font-size: 3rem;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+        }
+
+        header p {
+            font-size: 1.2rem;
+            opacity: 0.9;
+        }
+
+        .server-info {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            padding: 20px;
+            border-radius: 15px;
+            margin-bottom: 30px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            animation: fadeIn 1s ease;
+        }
+
+        .server-info h2 {
+            margin-bottom: 15px;
+            color: #ffd700;
+        }
+
+        .server-info .info-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+        }
+
+        .info-item {
+            background: rgba(0, 0, 0, 0.2);
+            padding: 15px;
+            border-radius: 10px;
+        }
+
+        .info-item strong {
+            display: block;
+            color: #ffd700;
+            margin-bottom: 5px;
+        }
+
+        .addons-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+            gap: 25px;
+            margin-bottom: 40px;
+        }
+
+        .addon-card {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 30px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            transition: all 0.3s ease;
+            animation: fadeInUp 0.8s ease;
+            animation-fill-mode: both;
+        }
+
+        .addon-card:nth-child(1) {
+            animation-delay: 0.1s;
+        }
+
+        .addon-card:nth-child(2) {
+            animation-delay: 0.2s;
+        }
+
+        .addon-card:nth-child(3) {
+            animation-delay: 0.3s;
+        }
+
+        .addon-card:nth-child(4) {
+            animation-delay: 0.4s;
+        }
+
+        .addon-card:nth-child(5) {
+            animation-delay: 0.5s;
+        }
+
+        .addon-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+            border-color: rgba(255, 255, 255, 0.4);
+        }
+
+        .addon-icon {
+            font-size: 3rem;
+            margin-bottom: 15px;
+        }
+
+        .addon-card h3 {
+            font-size: 1.5rem;
+            margin-bottom: 10px;
+            color: #ffd700;
+        }
+
+        .addon-card p {
+            margin-bottom: 20px;
+            opacity: 0.9;
+            line-height: 1.6;
+        }
+
+        .addon-links {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .btn {
+            display: inline-block;
+            padding: 12px 20px;
+            border-radius: 10px;
+            text-decoration: none;
+            font-weight: bold;
+            text-align: center;
+            transition: all 0.3s ease;
+            border: none;
+            cursor: pointer;
+            font-size: 0.95rem;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn-primary:hover {
+            transform: scale(1.05);
+            box-shadow: 0 6px 20px rgba(102, 126, 234, 0.6);
+        }
+
+        .btn-secondary {
+            background: rgba(255, 255, 255, 0.2);
+            color: white;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+        }
+
+        .btn-secondary:hover {
+            background: rgba(255, 255, 255, 0.3);
+            border-color: rgba(255, 255, 255, 0.5);
+        }
+
+        .copy-btn {
+            background: rgba(255, 215, 0, 0.2);
+            color: #ffd700;
+            border: 1px solid rgba(255, 215, 0, 0.3);
+            padding: 8px 15px;
+            font-size: 0.9rem;
+        }
+
+        .copy-btn:hover {
+            background: rgba(255, 215, 0, 0.3);
+        }
+
+        .manifest-url {
+            background: rgba(0, 0, 0, 0.3);
+            padding: 10px;
+            border-radius: 8px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.85rem;
+            word-break: break-all;
+            margin-bottom: 10px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .bulk-operations {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            padding: 25px;
+            border-radius: 15px;
+            margin-bottom: 30px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            animation: fadeIn 1s ease;
+        }
+
+        .bulk-operations h2 {
+            margin-bottom: 15px;
+            color: #ffd700;
+        }
+
+        .bulk-buttons {
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+        }
+
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 2000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.7);
+            backdrop-filter: blur(5px);
+            animation: fadeIn 0.3s ease;
+        }
+
+        .modal.show {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal-content {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 30px;
+            border-radius: 20px;
+            max-width: 600px;
+            width: 90%;
+            max-height: 80vh;
+            overflow-y: auto;
+            box-shadow: 0 10px 50px rgba(0, 0, 0, 0.5);
+            animation: fadeInUp 0.3s ease;
+        }
+
+        .modal-content h2 {
+            color: #ffd700;
+            margin-bottom: 20px;
+        }
+
+        .modal-content textarea {
+            width: 100%;
+            min-height: 300px;
+            padding: 15px;
+            border-radius: 10px;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            background: rgba(0, 0, 0, 0.3);
+            color: white;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9rem;
+            resize: vertical;
+            margin-bottom: 20px;
+        }
+
+        .modal-content textarea::placeholder {
+            color: rgba(255, 255, 255, 0.5);
+        }
+
+        .modal-buttons {
+            display: flex;
+            gap: 10px;
+            justify-content: flex-end;
+        }
+
+        .btn-success {
+            background: #4caf50;
+            color: white;
+        }
+
+        .btn-success:hover {
+            background: #45a049;
+        }
+
+        .btn-cancel {
+            background: rgba(255, 255, 255, 0.2);
+            color: white;
+        }
+
+        .btn-cancel:hover {
+            background: rgba(255, 255, 255, 0.3);
+        }
+
+        .instructions {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            padding: 30px;
+            border-radius: 15px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            animation: fadeIn 1.2s ease;
+        }
+
+        .instructions h2 {
+            margin-bottom: 20px;
+            color: #ffd700;
+        }
+
+        .instructions ol {
+            margin-left: 20px;
+            line-height: 2;
+        }
+
+        .instructions li {
+            margin-bottom: 10px;
+        }
+
+        .toast {
+            position: fixed;
+            bottom: 30px;
+            right: 30px;
+            background: #4caf50;
+            color: white;
+            padding: 15px 25px;
+            border-radius: 10px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+            opacity: 0;
+            transform: translateY(50px);
+            transition: all 0.3s ease;
+            pointer-events: none;
+            z-index: 1000;
+        }
+
+        .toast.show {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        footer {
+            text-align: center;
+            margin-top: 50px;
+            padding: 20px;
+            opacity: 0.8;
+        }
+
+        @keyframes fadeInDown {
+            from {
+                opacity: 0;
+                transform: translateY(-30px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+            }
+
+            to {
+                opacity: 1;
+            }
+        }
+
+        @keyframes fadeInUp {
+            from {
+                opacity: 0;
+                transform: translateY(30px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        @media (max-width: 768px) {
+            header h1 {
+                font-size: 2rem;
+            }
+
+            .addons-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <header>
+            <h1>🎬 Mind Turkish Addons</h1>
+            <p>Tüm Türkçe içerikler tek sunucuda!</p>
+            <div style="margin-top: 20px;">
+                <a href="/admin.html" class="btn btn-secondary" style="display: inline-block; text-decoration: none;">
+                    🔐 Yönetici Paneli
+                </a>
+            </div>
+        </header>
+
+        <div class="server-info">
+            <h2>📡 Sunucu Bilgileri</h2>
+            <div class="info-grid">
+                <div class="info-item">
+                    <strong>Sunucu Adresi:</strong>
+                    <span id="serverUrl">Yükleniyor...</span>
+                </div>
+                <div class="info-item">
+                    <strong>Port:</strong>
+                    <span id="serverPort">Yükleniyor...</span>
+                </div>
+                <div class="info-item">
+                    <strong>Durum:</strong>
+                    <span style="color: #4caf50;">🟢 Çalışıyor</span>
+                </div>
+                <div class="info-item">
+                    <strong>Toplam Addon:</strong>
+                    <span id="addonCount">22</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="bulk-operations">
+            <h2>📦 Toplu İşlemler</h2>
+            <div class="bulk-buttons">
+                <button class="btn btn-primary" id="copyAllLinksBtn">
+                    📋 Tüm Linkleri Kopyala
+                </button>
+                <button class="btn btn-secondary" id="bulkAddBtn">
+                    ⚡ Toplu Ekle
+                </button>
+            </div>
+        </div>
+
+        <div class="addons-grid" id="addonsGrid">
+            <!-- Addons will be loaded dynamically -->
+        </div>
+
+        <!-- Bulk Add Modal -->
+        <div class="modal" id="bulkAddModal">
+            <div class="modal-content">
+                <h2>📦 Toplu Eklenti Ekleme</h2>
+                <p style="margin-bottom: 15px; opacity: 0.9;">Her satıra bir manifest URL'si yapıştırın:</p>
+                <textarea id="bulkUrlsTextarea"
+                    placeholder="https://example.com/manifest1.json&#13;&#10;https://example.com/manifest2.json&#13;&#10;https://example.com/manifest3.json"></textarea>
+                <div class="modal-buttons">
+                    <button class="btn btn-cancel" id="cancelBulkBtn">İptal</button>
+                    <button class="btn btn-success" id="processBulkBtn">Ekle</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="instructions">
+            <h2>📖 Mind'ya Nasıl Eklenir?</h2>
+            <ol>
+                <li>Mind uygulamasını açın</li>
+                <li><strong>Addons</strong> sekmesine gidin</li>
+                <li>Sağ üstteki <strong>arama çubuğuna</strong> yukarıdaki manifest URL'lerinden birini yapıştırın</li>
+                <li><strong>Install</strong> butonuna tıklayın</li>
+                <li>Addon başarıyla yüklendi! 🎉</li>
+            </ol>
+        </div>
+
+        <footer>
+            <p>Made with ❤️ for Turkish Mind Users</p>
+            <p style="margin-top: 10px; font-size: 0.9rem; opacity: 0.7;">
+                Powered by Mind Addon SDK | Multi-Addon Server v1.0
+            </p>
+        </footer>
+    </div>
+
+    <div class="toast" id="toast">
+        📋 Link kopyalandı!
+    </div>
+
+    <script>
+        const addonsData = [
+            {
+                icon: '🤖',
+                name: 'Gemini AI Finder',
+                addonId: 'ai.gemini.finder',
+                description: 'Arama sonuçlarını ve sayfaları Gemini 1.5 Flash AI kullanarak analiz edip akıllı video bulan eklenti.',
+                features: ['Yapay Zeka Destekli', 'Akıllı Arama', 'Video Bulucu']
+            },
+            {
+                icon: '🎥',
+                name: 'FullHDFilmizlesene',
+                addonId: 'fullhdfilmizlesene',
+                description: 'Türkçe ve yabancı film izleme platformu. Yüksek kalitede filmler, çoklu server seçenekleri.',
+                features: ['HD/FHD Kalite', 'Çoklu Server', 'Türkçe Altyazı']
+            },
+            {
+                icon: '🎬',
+                name: 'InatBox',
+                addonId: 'inatbox',
+                description: 'Premium platformlar tek çatı altında. Netflix, Disney+, Amazon Prime, HBO, TV kanalları ve daha fazlası.',
+                features: ['Platform İçerikleri', 'Yerli Yapımlar', 'Canlı Kanallar']
+            },
+            {
+                icon: '📺',
+                name: 'DiziPal',
+                addonId: 'dizipal',
+                description: 'Türkçe dizi ve film platformu. Netflix, Exxen, BluTV, Disney+ ve daha fazlası.',
+                features: ['Yerli/Yabancı Diziler', 'Platform Koleksiyonları', 'Altyazı Desteği']
+            },
+            {
+                icon: '⚽',
+                name: 'SelcukSports HD',
+                addonId: 'selcuksports',
+                description: 'Canlı spor kanalları ve maç yayınları. beIN Sports, S Sport, TRT Spor ve daha fazlası.',
+                features: ['Canlı Maçlar', 'Spor Kanalları', '7/24 Yayın']
+            },
+            {
+                icon: '🏆',
+                name: 'SporCafe',
+                addonId: 'sporcafe',
+                description: 'Canlı spor yayınları ve maç izleme platformu. Futbol, basketbol ve diğer spor dalları.',
+                features: ['Canlı Maçlar', 'Spor Kanalları', 'HD Yayın']
+            },
+            {
+                icon: '⚽',
+                name: 'Webspor',
+                addonId: 'webspor',
+                description: 'Webspor ile canlı maç keyfini yaşayın. beIN Sports, S Sport, Tivibu Spor ve daha fazlası.',
+                features: ['Canlı Maçlar', 'Spor Kanalları', 'HD Kalite']
+            },
+            {
+                icon: '🎌',
+                name: 'AnimeciX',
+                addonId: 'animecix',
+                description: 'Türkçe anime izleme platformu. Türkçe altyazılı ve dublajlı anime içerikleri.',
+                features: ['Türkçe Alt Yazı', 'Türkçe Dublaj', 'Yeni Bölümler']
+            },
+            {
+                icon: '📚',
+                name: 'BelgeselX',
+                addonId: 'belgeselx',
+                description: 'Türkçe belgesel platformu. Doğa, tarih, bilim ve daha fazla kategoride belgeseller.',
+                features: ['Türkçe Belgeseller', 'HD Kalite', 'Geniş Arşiv']
+            },
+            {
+                icon: '📡',
+                name: 'CanliTV',
+                addonId: 'canlitv',
+                description: 'Canlı TV kanalları. Yerli ve yabancı televizyon kanallarını canlı izleyin.',
+                features: ['Canlı Yayın', 'HD Kanallar', 'Kesintisiz İzleme']
+            },
+            {
+                icon: '🎨',
+                name: 'CizgiMax',
+                addonId: 'cizgimax',
+                description: 'Türkçe çizgi film platformu. Çocuklar için güvenli ve eğlenceli içerikler.',
+                features: ['Çizgi Filmler', 'Türkçe Dublaj', 'Çocuk Dostu']
+            },
+            {
+                icon: '🎬',
+                name: 'CizgiveDizi',
+                addonId: 'cizgivedizi',
+                description: 'Türkçe çizgi film ve dizi platformu. Animeler, çizgi diziler ve daha fazlası.',
+                features: ['Çizgi Diziler', 'Animeler', 'Türkçe Dublaj']
+            },
+            {
+                icon: '📦',
+                name: 'DiziBox',
+                addonId: 'dizibox',
+                description: 'Türk ve yabancı dizi platformu. Güncel diziler ve klasik yapımlar.',
+                features: ['Yeni Diziler', 'Klasik Diziler', 'HD Kalite']
+            },
+            {
+                icon: '🎞️',
+                name: 'HDFilmCehennemi',
+                addonId: 'hdfilmcehennemi',
+                description: 'HD kalitede film ve dizi izleme platformu. Geniş film arşivi ve güncel içerikler.',
+                features: ['HD/FHD Kalite', 'Geniş Arşiv', 'Hızlı Erişim']
+            },
+            {
+                icon: '🎭',
+                name: 'SelcukFlix',
+                addonId: 'selcukflix',
+                description: 'Film ve dizi izleme platformu. Geniş içerik arşivi ve yüksek kalite.',
+                features: ['HD Kalite', 'Geniş Arşiv', 'Türkçe Dublaj']
+            },
+            {
+                icon: '🎬',
+                name: '4KFilmİzlesene',
+                addonId: '4kfilmizlesene',
+                description: '4K kalitede film izleme platformu. Türkçe ve yabancı filmler yüksek kalitede.',
+                features: ['4K Kalite', 'Çoklu Tür', 'Geniş Arşiv']
+            },
+            {
+                icon: '📺',
+                name: 'Dizist',
+                addonId: 'dizist',
+                description: 'Yabancı diziler, animeler ve Asya dizileri platformu. Türkçe altyazılı içerikler.',
+                features: ['Yabancı Diziler', 'Anime', 'Asya Dizileri']
+            },
+            {
+                icon: '🎥',
+                name: 'Sinefy',
+                addonId: 'sinefy',
+                description: 'Netflix içerikleri ve popüler film/diziler. Türk ve yabancı yapımlar.',
+                features: ['Netflix İçerikleri', 'Yeni Filmler', 'HD Kalite']
+            },
+            {
+                icon: '📡',
+                name: 'Tv8',
+                addonId: 'tv8',
+                description: 'Tv8 canlı yayını ve programları. Yarışmalar, diziler ve eğlence programları.',
+                features: ['Canlı Yayın', 'Yarışmalar', 'Diziler']
+            },
+            {
+                icon: '🎬',
+                name: 'WebteIzle',
+                addonId: 'webteizle',
+                description: 'Türkçe film platformu. HD kalitede filmler ve çoklu server seçenekleri.',
+                features: ['HD Filmler', 'Çoklu Server', 'Türkçe Dublaj']
+            },
+            {
+                icon: '🎮',
+                name: 'Kick.com TR',
+                addonId: 'kicktr',
+                description: 'Türk yayıncılar ve Kick.com canlı yayınları. Popüler kanallar ve oyun yayınları.',
+                features: ['Canlı Yayın', 'Türk Yayıncılar', 'Oyun Yayınları']
+            },
+            {
+                icon: '📺',
+                name: 'DiziMag',
+                addonId: 'dizimag',
+                description: 'Türkçe dizi ve film izleme platformu. Yerli ve yabancı diziler, geniş tür seçenekleri.',
+                features: ['Türkçe Altyazı', 'Dizi & Film', 'Geniş Arşiv']
+            },
+            {
+                icon: '🎬',
+                name: 'DiziGom',
+                addonId: 'dizigom',
+                description: 'Türkçe dizi ve film izleme platformu. Yeni bölümler, filmler ve tür kategorileri.',
+                features: ['Yeni Bölümler', 'HD Filmler', 'Türkçe İçerik']
+            }
+        ];
+
+        // Get current server URL
+        const protocol = window.location.protocol;
+        const hostname = window.location.hostname;
+        const port = window.location.port;
+        const baseUrl = port ? `${protocol}//${hostname}:${port}` : `${protocol}//${hostname}`;
+
+        // Update server info
+        document.getElementById('serverUrl').textContent = `${protocol}//${hostname}${port ? ':' + port : ''}`;
+        document.getElementById('serverPort').textContent = port || '80/443';
+
+        // Generate addon cards
+        const addonsGrid = document.getElementById('addonsGrid');
+
+        addonsData.forEach(addon => {
+            const manifestUrl = `${baseUrl}/api/addon/${addon.addonId}/manifest.json`;
+            const protocolType = protocol === 'https:' ? 'https' : 'http';
+            const MindUrl = `mind://${protocolType}/${manifestUrl.replace(`${protocol}//`, '')}`;
+
+            const card = document.createElement('div');
+            card.className = 'addon-card';
+            card.innerHTML = `
+                <div class="addon-icon">${addon.icon}</div>
+                <h3>${addon.name}</h3>
+                <p>${addon.description}</p>
+                <div style="margin-bottom: 15px;">
+                    ${addon.features.map(f => `<span style="display: inline-block; background: rgba(255,215,0,0.2); color: #ffd700; padding: 4px 10px; border-radius: 15px; font-size: 0.85rem; margin: 3px;">${f}</span>`).join('')}
+                </div>
+                <div class="manifest-url">${manifestUrl}</div>
+                <div class="addon-links">
+                    <button class="btn copy-btn" data-url="${manifestUrl}">
+                        📋 Manifest URL'yi Kopyala
+                    </button>
+                    <a href="${manifestUrl}" target="_blank" class="btn btn-secondary">
+                        🔗 Manifest'i Görüntüle
+                    </a>
+                    <a href="${MindUrl}" class="btn btn-primary">
+                        ⚡ Mind'de Aç
+                    </a>
+                </div>
+            `;
+            addonsGrid.appendChild(card);
+        });
+
+        // Add click event listeners to copy buttons
+        document.addEventListener('click', function (e) {
+            if (e.target.classList.contains('copy-btn') || e.target.closest('.copy-btn')) {
+                const btn = e.target.classList.contains('copy-btn') ? e.target : e.target.closest('.copy-btn');
+                const url = btn.getAttribute('data-url');
+                if (url) {
+                    copyToClipboard(url);
+                }
+            }
+        });
+
+        function copyToClipboard(text) {
+            navigator.clipboard.writeText(text).then(() => {
+                showToast();
+            }).catch(err => {
+                console.error('Kopyalama hatası:', err);
+                // Fallback method
+                const textarea = document.createElement('textarea');
+                textarea.value = text;
+                document.body.appendChild(textarea);
+                textarea.select();
+                document.execCommand('copy');
+                document.body.removeChild(textarea);
+                showToast();
+            });
+        }
+
+        function showToast(message = '📋 Link kopyalandı!') {
+            const toast = document.getElementById('toast');
+            toast.textContent = message;
+            toast.classList.add('show');
+            setTimeout(() => {
+                toast.classList.remove('show');
+            }, 3000);
+        }
+
+        // Bulk operations functionality
+        const copyAllLinksBtn = document.getElementById('copyAllLinksBtn');
+        const bulkAddBtn = document.getElementById('bulkAddBtn');
+        const bulkAddModal = document.getElementById('bulkAddModal');
+        const cancelBulkBtn = document.getElementById('cancelBulkBtn');
+        const processBulkBtn = document.getElementById('processBulkBtn');
+        const bulkUrlsTextarea = document.getElementById('bulkUrlsTextarea');
+
+        // Copy all links button
+        copyAllLinksBtn.addEventListener('click', function () {
+            const allUrls = addonsData.map(addon => {
+                return `${baseUrl}/api/addon/${addon.addonId}/manifest.json`;
+            }).join('\n');
+
+            copyToClipboard(allUrls);
+            showToast('📋 Tüm linkler kopyalandı! (' + addonsData.length + ' adet)');
+        });
+
+        // Open bulk add modal
+        bulkAddBtn.addEventListener('click', function () {
+            bulkAddModal.classList.add('show');
+        });
+
+        // Close modal
+        cancelBulkBtn.addEventListener('click', function () {
+            bulkAddModal.classList.remove('show');
+            bulkUrlsTextarea.value = '';
+        });
+
+        // Close modal when clicking outside
+        bulkAddModal.addEventListener('click', function (e) {
+            if (e.target === bulkAddModal) {
+                bulkAddModal.classList.remove('show');
+                bulkUrlsTextarea.value = '';
+            }
+        });
+
+        // Process bulk URLs
+        processBulkBtn.addEventListener('click', function () {
+            const urls = bulkUrlsTextarea.value
+                .split('\n')
+                .map(url => url.trim())
+                .filter(url => url.length > 0);
+
+            if (urls.length === 0) {
+                showToast('⚠️ Lütfen en az bir URL girin!');
+                return;
+            }
+
+            // Validate URLs
+            const validUrls = urls.filter(url => {
+                try {
+                    new URL(url);
+                    return url.includes('manifest.json');
+                } catch {
+                    return false;
+                }
+            });
+
+            if (validUrls.length === 0) {
+                showToast('⚠️ Geçerli manifest URL\'si bulunamadı!');
+                return;
+            }
+
+            // Create Mind URLs for each valid URL
+            const MindUrls = validUrls.map(url => {
+                const urlObj = new URL(url);
+                const protocolType = urlObj.protocol === 'https:' ? 'https' : 'http';
+                return `mind://${protocolType}/${url.replace(/^https?:\/\//, '')}`;
+            });
+
+            // Open each Mind URL in a new tab with a small delay
+            let index = 0;
+            const interval = setInterval(() => {
+                if (index < MindUrls.length) {
+                    window.open(MindUrls[index], '_blank');
+                    index++;
+                } else {
+                    clearInterval(interval);
+                    showToast(`✅ ${validUrls.length} eklenti Mind'de açıldı!`);
+                    bulkAddModal.classList.remove('show');
+                    bulkUrlsTextarea.value = '';
+                }
+            }, 500); // 500ms delay between each URL
+        });
+    </script>
+</body>
+
+</html>
