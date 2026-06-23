@@ -2,6 +2,7 @@ import base64
 import json
 import re
 import urllib.parse
+import urllib.request
 import random
 import time
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
@@ -117,6 +118,85 @@ class InatBoxScraper:
 
     def getManifest(self):
         return self.manifest
+
+    def _extract_tracks(self, content, sourceUrl, subtitles, audioTracks):
+        """HTML/JS içeriğinden subtitle ve audio track çıkar"""
+        tracks_patterns = [
+            r'tracks\s*:\s*(\[[\s\S]*?\])\s*[,}]',
+            r'tracks\s*:\s*(\[[\s\S]*?\])',
+            r'"tracks"\s*:\s*(\[[\s\S]*?\])',
+        ]
+        
+        for pattern in tracks_patterns:
+            tracks_match = re.search(pattern, content)
+            if tracks_match:
+                try:
+                    raw = tracks_match.group(1)
+                    raw = re.sub(r',\s*\]', ']', raw)
+                    tracksData = json.loads(raw)
+                    
+                    for track in tracksData:
+                        kind = track.get('kind', '').lower()
+                        file_url = track.get('file', '')
+                        
+                        if not file_url:
+                            continue
+                        
+                        if not file_url.startswith('http'):
+                            file_url = urllib.parse.urljoin(sourceUrl, file_url)
+                        
+                        label = track.get('label') or track.get('language') or ''
+                        
+                        if kind in ['captions', 'subtitles']:
+                            sub_id = label.lower().replace(' ', '_') if label else 'tr'
+                            if not any(s['url'] == file_url for s in subtitles):
+                                subtitles.append({'id': sub_id, 'url': file_url, 'lang': label or 'Türkçe'})
+                        elif kind in ['audio', 'audiotrack']:
+                            audio_id = label.lower().replace(' ', '_') if label else 'default'
+                            if not any(a['url'] == file_url for a in audioTracks):
+                                audioTracks.append({'id': audio_id, 'url': file_url, 'lang': label or 'Orijinal'})
+                    
+                    if subtitles or audioTracks:
+                        break
+                except:
+                    continue
+
+    def _extract_item_subtitles(self, item, subtitles):
+        try:
+            chReg = item.get('chReg')
+            if chReg and chReg != 'null':
+                if isinstance(chReg, str): chReg = json.loads(chReg)
+                if isinstance(chReg, list):
+                    for regItem in chReg:
+                        if regItem.get('Subtitle'):
+                            for part in regItem['Subtitle'].split(','):
+                                m = re.search(r'\[([^\]]+)\]', part)
+                                if m:
+                                    lang = m.group(1)
+                                    subUrl = part.replace(f"[{lang}]", '').strip()
+                                    if subUrl:
+                                        sub_id = lang.lower().replace(' ', '_')
+                                        if not any(s['url'] == subUrl for s in subtitles):
+                                            subtitles.append({'id': sub_id, 'url': subUrl, 'lang': lang})
+                        if regItem.get('SubtitleUrl'):
+                            lang = regItem.get('SubtitleLang') or regItem.get('SubtitleName') or 'Türkçe'
+                            sub_id = lang.lower().replace(' ', '_')
+                            if not any(s['url'] == regItem['SubtitleUrl'] for s in subtitles):
+                                subtitles.append({'id': sub_id, 'url': regItem['SubtitleUrl'], 'lang': lang})
+        except Exception as e: print("EXCEPTION IN LOOP:", e)
+        
+        try:
+            if item.get('SubtitleUrl'):
+                lang = item.get('SubtitleLang') or item.get('SubtitleName') or 'Türkçe'
+                sub_id = lang.lower().replace(' ', '_')
+                if not any(s['url'] == item['SubtitleUrl'] for s in subtitles):
+                    subtitles.append({'id': sub_id, 'url': item['SubtitleUrl'], 'lang': lang})
+            if item.get('diziSubUrl'):
+                lang = 'Türkçe'
+                sub_id = 'tr'
+                if not any(s['url'] == item['diziSubUrl'] for s in subtitles):
+                    subtitles.append({'id': sub_id, 'url': item['diziSubUrl'], 'lang': lang})
+        except Exception as e: print("EXCEPTION IN LOOP:", e)
 
     def get_aes_key(self, url):
         import string
@@ -274,7 +354,7 @@ class InatBoxScraper:
                 if isinstance(chHeaders, list) and len(chHeaders) > 0 and isinstance(chHeaders[0], dict):
                     referer = chHeaders[0].get('Referer', referer)
                     ua = chHeaders[0].get('UserAgent', ua)
-            except: pass
+            except Exception as e: print("EXCEPTION IN LOOP:", e)
             
             if '.m3u8' in extractUrl or '.mpd' in extractUrl:
                 print(f"🐛 [InatBox Debug] Returning direct stream link: {extractUrl}")
@@ -324,7 +404,7 @@ class InatBoxScraper:
                         headersObject.update(chHeaders[0])
                     elif isinstance(chHeaders, dict):
                         headersObject.update(chHeaders)
-            except: pass
+            except Exception as e: print("EXCEPTION IN LOOP:", e)
             
             try:
                 chReg = item.get('chReg')
@@ -335,7 +415,7 @@ class InatBoxScraper:
                             headersObject['Cookie'] = parsed[0]['playSH2']
                     elif isinstance(chReg, list) and len(chReg)>0 and chReg[0].get('playSH2'):
                         headersObject['Cookie'] = chReg[0]['playSH2']
-            except: pass
+            except Exception as e: print("EXCEPTION IN LOOP:", e)
             
             return {'streams': [{
                 'url': streamUrl,
@@ -414,7 +494,7 @@ class InatBoxScraper:
                             headersObject.update(chHeaders[0])
                         elif isinstance(chHeaders, dict):
                             headersObject.update(chHeaders)
-                except: pass
+                except Exception as e: print("EXCEPTION IN LOOP:", e)
                 
                 try:
                     chReg = item.get('chReg')
@@ -425,7 +505,7 @@ class InatBoxScraper:
                                 headersObject['Cookie'] = parsed[0]['playSH2']
                         elif isinstance(chReg, list) and len(chReg)>0 and chReg[0].get('playSH2'):
                             headersObject['Cookie'] = chReg[0]['playSH2']
-                except: pass
+                except Exception as e: print("EXCEPTION IN LOOP:", e)
                 
                 streams = [{
                     'url': streamUrl,
@@ -438,6 +518,12 @@ class InatBoxScraper:
                     'addonName': 'inatbox',
                     'addonManifestUrl': addonManifestUrl
                 }]
+                
+                subtitles = []
+                self._extract_item_subtitles(item, subtitles)
+                if subtitles:
+                    streams[0]['subtitles'] = subtitles
+                    
                 print(f"🐛 [InatBox Debug] Extracted direct stream: {streamUrl}")
                 return {'streams': streams}
                 
@@ -578,9 +664,19 @@ class InatBoxScraper:
             item = metadata.get('originalItem')
             if not item: return {'streams': []}
             
+            ch_name_str = item.get('chName') or item.get('diziName') or ''
+            lang_tag = 'TR' if ' TR' in ch_name_str or '-TR' in ch_name_str or '- TR' in ch_name_str else 'EN' if ' EN' in ch_name_str or '-EN' in ch_name_str or '- EN' in ch_name_str else ''
+            base_name = f"InatBox {lang_tag}".strip()
+            
             sourceUrl = item.get('chUrl') or item.get('url')
             streams = []
+            subtitles = []
+            audioTracks = []
             
+            self._extract_item_subtitles(item, subtitles)
+            if body and isinstance(body, str):
+                self._extract_tracks(body, sourceUrl, subtitles, audioTracks)
+                
             if '.m3u8' in sourceUrl or '.mpd' in sourceUrl:
                 headersObject = {'User-Agent': self.CONFIG['userAgent'], 'Referer': ''}
                 try:
@@ -592,7 +688,7 @@ class InatBoxScraper:
                             elif isinstance(parsed, dict): headersObject.update(parsed)
                         elif isinstance(chHeaders, list) and len(chHeaders)>0: headersObject.update(chHeaders[0])
                         elif isinstance(chHeaders, dict): headersObject.update(chHeaders)
-                except: pass
+                except Exception as e: print("EXCEPTION IN LOOP:", e)
                 
                 try:
                     chReg = item.get('chReg')
@@ -603,48 +699,20 @@ class InatBoxScraper:
                                 headersObject['Cookie'] = parsed[0]['playSH2']
                         elif isinstance(chReg, list) and len(chReg)>0 and chReg[0].get('playSH2'):
                             headersObject['Cookie'] = chReg[0]['playSH2']
-                except: pass
+                except Exception as e: print("EXCEPTION IN LOOP:", e)
                 
                 stream = {
                     'url': sourceUrl,
-                    'name': item.get('chName') or 'Direct Stream',
-                    'title': item.get('chName') or 'Direct Stream',
+                    'name': f"{base_name} (Direct)",
+                    'title': ch_name_str or 'Direct Stream',
                     'behaviorHints': {'notWebReady': False, 'httpHeaders': headersObject},
                     'addonName': 'inatbox',
                     'addonManifestUrl': addonManifestUrl
                 }
                 print(f"🐛 [InatBox Debug] Extracted direct stream: {sourceUrl}")
-                
-                subtitles = []
-                try:
-                    chReg = item.get('chReg')
-                    if chReg and chReg != 'null':
-                        if isinstance(chReg, str): chReg = json.loads(chReg)
-                        if isinstance(chReg, list):
-                            for regItem in chReg:
-                                if regItem.get('Subtitle'):
-                                    for part in regItem['Subtitle'].split(','):
-                                        m = re.search(r'\[([^\]]+)\]', part)
-                                        if m:
-                                            lang = m.group(1)
-                                            subUrl = part.replace(f"[{lang}]", '').strip()
-                                            if subUrl:
-                                                subtitles.append({
-                                                    'id': lang.lower().replace(' ', '_'),
-                                                    'url': subUrl,
-                                                    'lang': lang
-                                                })
-                                if regItem.get('SubtitleUrl'):
-                                    lang = regItem.get('SubtitleLang') or regItem.get('SubtitleName') or 'Türkçe'
-                                    sub_id = lang.lower().replace(' ', '_')
-                                    if not any(s['id'] == sub_id for s in subtitles):
-                                        subtitles.append({'id': sub_id, 'url': regItem['SubtitleUrl'], 'lang': lang})
-                except: pass
-                if subtitles: stream['subtitles'] = subtitles
                 streams.append(stream)
-                return {'streams': streams}
                 
-            if 'dzen.ru' in sourceUrl:
+            elif 'dzen.ru' in sourceUrl:
                 for match in re.finditer(r'\{"url":"([^"]*)","type":"([^"]*)"\}', body, re.IGNORECASE):
                     videoUrl = match.group(1)
                     qMatch = re.search(r'=(\w+)$', videoUrl)
@@ -652,8 +720,8 @@ class InatBoxScraper:
                     quality = qualityMap.get(qMatch.group(1)) if qMatch else 'Unknown'
                     streams.append({
                         'url': videoUrl,
-                        'name': f"{item.get('chName') or 'Dzen'} - {quality}",
-                        'title': f"{item.get('chName') or 'Dzen'} - {quality}",
+                        'name': f"{base_name}\n{quality}",
+                        'title': ch_name_str or 'Dzen Stream',
                         'behaviorHints': {'notWebReady': False, 'httpHeaders': {'Referer': 'https://dzen.ru/'}},
                         'addonName': 'inatbox',
                         'addonManifestUrl': addonManifestUrl
@@ -665,8 +733,8 @@ class InatBoxScraper:
                     videoUrl = match.group(1).replace('\\/', '/')
                     streams.append({
                         'url': videoUrl,
-                        'name': item.get('chName') or 'VK Stream',
-                        'title': item.get('chName') or 'VK Stream',
+                        'name': f"{base_name} (VK)",
+                        'title': ch_name_str or 'VK Stream',
                         'behaviorHints': {'notWebReady': False, 'httpHeaders': {'Referer': 'https://vk.com/'}},
                         'addonName': 'inatbox',
                         'addonManifestUrl': addonManifestUrl
@@ -677,8 +745,8 @@ class InatBoxScraper:
                 if match:
                     streams.append({
                         'url': match.group(0),
-                        'name': item.get('chName') or 'Yandex Disk',
-                        'title': item.get('chName') or 'Yandex Disk',
+                        'name': f"{base_name} (Yandex)",
+                        'title': ch_name_str or 'Yandex Disk',
                         'behaviorHints': {'notWebReady': False, 'httpHeaders': {'Referer': ''}},
                         'addonName': 'inatbox',
                         'addonManifestUrl': addonManifestUrl
@@ -688,8 +756,8 @@ class InatBoxScraper:
                 if '.m3u8' in sourceUrl or '.mpd' in sourceUrl:
                     streams.append({
                         'url': sourceUrl,
-                        'name': item.get('chName') or 'Dzen CDN',
-                        'title': item.get('chName') or 'Dzen CDN',
+                        'name': f"{base_name} (CDN)",
+                        'title': ch_name_str or 'Dzen CDN',
                         'behaviorHints': {'notWebReady': False, 'httpHeaders': {'Referer': ''}},
                         'addonName': 'inatbox',
                         'addonManifestUrl': addonManifestUrl
@@ -698,8 +766,8 @@ class InatBoxScraper:
             elif 'cdn.jwplayer.com' in sourceUrl or '.m3u8' in sourceUrl:
                 streams.append({
                     'url': sourceUrl,
-                    'name': item.get('chName') or 'CDN Stream',
-                    'title': item.get('chName') or 'CDN Stream',
+                    'name': f"{base_name} (CDN)",
+                    'title': ch_name_str or 'CDN Stream',
                     'behaviorHints': {'notWebReady': False, 'httpHeaders': {'Referer': ''}},
                     'addonName': 'inatbox',
                     'addonManifestUrl': addonManifestUrl
@@ -718,7 +786,7 @@ class InatBoxScraper:
                             if decrypted:
                                 parsed_json = json.loads(decrypted)
                                 extractedUrl = parsed_json.get('chUrl')
-                        except: pass
+                        except Exception as e: print("EXCEPTION IN LOOP:", e)
                         
                         # Fallback to standard regex search if decryption failed or didn't yield a URL
                         if not extractedUrl:
@@ -726,7 +794,7 @@ class InatBoxScraper:
                                 match = re.search(regexPattern, body, re.IGNORECASE)
                                 if match and match.group(1):
                                     extractedUrl = match.group(1)
-                            except: pass
+                            except Exception as e: print("EXCEPTION IN LOOP:", e)
                 
                 finalUrl = extractedUrl or sourceUrl
                 headersArray = item.get('chHeaders') or {'Referer': '', 'User-Agent': self.CONFIG['userAgent']}
@@ -738,94 +806,101 @@ class InatBoxScraper:
                 
                 genericStream = {
                     'url': finalUrl,
-                    'name': item.get('chName') or 'Generic Stream',
-                    'title': item.get('chName') or 'Generic Stream',
+                    'name': base_name,
+                    'title': ch_name_str or 'Generic Stream',
                     'behaviorHints': {'notWebReady': False, 'httpHeaders': headersArray},
                     'addonName': 'inatbox',
                     'addonManifestUrl': addonManifestUrl
                 }
                 print(f"🐛 [InatBox Debug] Extracted generic stream: {finalUrl}")
-                
-                subtitles = []
-                try:
-                    chReg = item.get('chReg')
-                    if chReg and chReg != 'null':
-                        if isinstance(chReg, str): chReg = json.loads(chReg)
-                        if isinstance(chReg, list):
-                            for regItem in chReg:
-                                if regItem.get('Subtitle'):
-                                    for part in regItem['Subtitle'].split(','):
-                                        m = re.search(r'\[([^\]]+)\]', part)
-                                        if m:
-                                            lang = m.group(1)
-                                            subUrl = part.replace(f"[{lang}]", '').strip()
-                                            if subUrl:
-                                                subtitles.append({
-                                                    'id': lang.lower().replace(' ', '_'),
-                                                    'url': subUrl,
-                                                    'lang': lang
-                                                })
-                                if regItem.get('SubtitleUrl'):
-                                    lang = regItem.get('SubtitleLang') or regItem.get('SubtitleName') or 'Türkçe'
-                                    sub_id = lang.lower().replace(' ', '_')
-                                    if not any(s['id'] == sub_id for s in subtitles):
-                                        subtitles.append({'id': sub_id, 'url': regItem['SubtitleUrl'], 'lang': lang})
-                except: pass
-                if subtitles: genericStream['subtitles'] = subtitles
                 streams.append(genericStream)
                 
+            for s in streams:
+                if subtitles and 'subtitles' not in s:
+                    s['subtitles'] = subtitles
+                if audioTracks and 'audioTracks' not in s:
+                    s['audioTracks'] = audioTracks
+                    
             return {'streams': streams}
 
         if purpose == 'stream_fetch_for_extract':
             item = metadata.get('originalItem')
             if not item or not data: return {'streams': []}
+            items_to_process = data if isinstance(data, list) else [data]
+            all_streams = []
             
-            firstItem = None
-            if isinstance(data, list) and len(data)>0: firstItem = data[0]
-            elif isinstance(data, dict): firstItem = data
-            
-            if not firstItem or not firstItem.get('chUrl'): return {'streams': []}
-            
-            chHeaders = firstItem.get('chHeaders') or item.get('chHeaders') or []
-            extractItem = {
-                'chName': item.get('chName') or item.get('diziName'),
-                'chUrl': vk_source_fix(firstItem.get('chUrl')),
-                'chImg': item.get('chImg') or item.get('diziImg'),
-                'chHeaders': chHeaders,
-                'chReg': firstItem.get('chReg') or item.get('chReg') or None,
-                'chType': item.get('chType') or item.get('diziType')
-            }
-            
-            referer = 'https://speedrestapi.com/'
-            ua = self.CONFIG['userAgent']
-            if isinstance(chHeaders, list) and len(chHeaders)>0 and isinstance(chHeaders[0], dict):
-                referer = chHeaders[0].get('Referer', referer)
-                ua = chHeaders[0].get('UserAgent', ua)
+            for d in items_to_process:
+                if not isinstance(d, dict) or not d.get('chUrl'): continue
                 
-            if '.m3u8' in extractItem['chUrl'] or '.mpd' in extractItem['chUrl']:
-                print(f"🐛 [InatBox Debug] Returning direct stream link: {extractItem['chUrl']}")
-                return await self.processFetchResult({
+                chHeaders = d.get('chHeaders') or item.get('chHeaders') or []
+                ext_item = item.copy()
+                ext_item.update(d)
+                
+                ext_item['chUrl'] = vk_source_fix(d.get('chUrl'))
+                ext_item['chName'] = d.get('chName') or d.get('diziName') or item.get('chName') or item.get('diziName')
+                ext_item['chImg'] = d.get('chImg') or d.get('diziImg') or item.get('chImg') or item.get('diziImg')
+                ext_item['chHeaders'] = chHeaders
+                
+                if not ext_item.get('chReg'): ext_item['chReg'] = item.get('chReg')
+                if not ext_item.get('chType'): ext_item['chType'] = item.get('chType') or item.get('diziType')
+                
+                source_url = ext_item['chUrl']
+                body = ''
+                
+                if '.m3u8' not in source_url and '.mpd' not in source_url:
+                    try:
+                        print(f"🐛 [InatBox Debug] Fetching {source_url} natively in Python...")
+                        req = urllib.request.Request(source_url, headers={'User-Agent': self.CONFIG['userAgent']})
+                        with urllib.request.urlopen(req, timeout=5) as response:
+                            body = response.read().decode('utf-8', errors='ignore')
+                    except Exception as e:
+                        print(f"🐛 [InatBox Debug] Native fetch failed for {source_url}: {e}")
+                
+                res = await self.processFetchResult({
                     'purpose': 'stream_extract',
-                    'body': '',
-                    'metadata': {'originalItem': extractItem},
+                    'body': body,
+                    'metadata': {'originalItem': ext_item},
                     'addonManifestUrl': addonManifestUrl
                 })
                 
-            return {
-                'instructions': [{
-                    'requestId': f"inat-extract-{int(time.time()*1000)}",
-                    'purpose': 'stream_extract',
-                    'url': extractItem['chUrl'],
-                    'method': 'GET',
-                    'headers': {
-                        'Accept': '*/*',
-                        'Referer': referer,
-                        'User-Agent': ua,
-                        'X-Requested-With': 'XMLHttpRequest'
-                    },
-                    'metadata': {'originalItem': extractItem, 'extractorNeeded': True}
-                }]
-            }
+                if res and 'streams' in res:
+                    all_streams.extend(res['streams'])
+            
+            if all_streams:
+                return {'streams': all_streams}
+                
+            # Fallback to single instruction if native extraction completely failed and we only have 1 item
+            if len(items_to_process) > 0:
+                d = items_to_process[0]
+                chHeaders = d.get('chHeaders') or item.get('chHeaders') or []
+                ext_item = item.copy()
+                ext_item.update(d)
+                ext_item['chUrl'] = vk_source_fix(d.get('chUrl'))
+                if not ext_item.get('chReg'): ext_item['chReg'] = item.get('chReg')
+                
+                referer = 'https://speedrestapi.com/'
+                ua = self.CONFIG['userAgent']
+                if isinstance(chHeaders, list) and len(chHeaders)>0 and isinstance(chHeaders[0], dict):
+                    referer = chHeaders[0].get('Referer', referer)
+                    ua = chHeaders[0].get('UserAgent', ua)
+                    
+                return {
+                    'instructions': [{
+                        'requestId': f"inat-extract-{int(time.time()*1000)}",
+                        'purpose': 'stream_extract',
+                        'url': ext_item['chUrl'],
+                        'method': 'GET',
+                        'headers': {
+                            'Accept': '*/*',
+                            'Referer': referer,
+                            'User-Agent': ua,
+                            'X-Requested-With': 'XMLHttpRequest'
+                        },
+                        'metadata': {'originalItem': ext_item, 'extractorNeeded': True}
+                    }]
+                }
+            
+            return {'streams': []}
 
         if purpose in ['meta', 'meta_series_seasons', 'meta_series_episodes']:
             item = metadata.get('originalItem')
@@ -878,7 +953,7 @@ class InatBoxScraper:
                                 'body': self.buildRequestBody(aesKey=metadata.get('aesKey')),
                                 'metadata': {'originalItem': item, 'seasonNumber': idx+1, 'seasonName': season.get('diziName'), 'aesKey': metadata.get('aesKey')}
                             })
-                        except: pass
+                        except Exception as e: print("EXCEPTION IN LOOP:", e)
                 if data and data[0].get('diziImg'):
                     meta['poster'] = data[0]['diziImg']
                 if not episodeInstructions: return {'meta': meta}
