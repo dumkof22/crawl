@@ -425,7 +425,7 @@
                 </div>
                 <div class="info-item">
                     <strong>Toplam Addon:</strong>
-                    <span id="addonCount">22</span>
+                    <span id="addonCount">Yükleniyor...</span>
                 </div>
             </div>
         </div>
@@ -645,6 +645,13 @@
                 addonId: 'dizigom',
                 description: 'Türkçe dizi ve film izleme platformu. Yeni bölümler, filmler ve tür kategorileri.',
                 features: ['Yeni Bölümler', 'HD Filmler', 'Türkçe İçerik']
+            },
+            {
+                icon: '▶️',
+                name: 'YouTube',
+                addonId: 'youtube',
+                description: 'YouTube videoları arama ve trendleri izleme eklentisi.',
+                features: ['Arama', 'Trendler', 'Video Oynatma']
             }
         ];
 
@@ -657,6 +664,7 @@
         // Update server info
         document.getElementById('serverUrl').textContent = `${protocol}//${hostname}${port ? ':' + port : ''}`;
         document.getElementById('serverPort').textContent = port || '80/443';
+        document.getElementById('addonCount').textContent = addonsData.length;
 
         // Generate addon cards
         const addonsGrid = document.getElementById('addonsGrid');

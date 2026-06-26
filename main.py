@@ -128,6 +128,12 @@ except ImportError as e:
     print(f"Error loading AI Addon: {e}")
     ai_addon = DummyAddon("GeminiAIFinder")
 
+try:
+    from addons.youtube import YouTubeScraper
+    youtube_addon = YouTubeScraper()
+except ImportError:
+    youtube_addon = DummyAddon("YouTube")
+
 addon_modules = {
     'cizgivedizi': cizgivedizi_addon,
     'fullhdfilmizlesene': DummyAddon("FullHDFilmIzlesene"),
@@ -141,6 +147,7 @@ addon_modules = {
     'dizimag': dizimag_addon,
     'dizibox': dizibox_addon,
     'ai.gemini.finder': ai_addon,
+    'youtube': youtube_addon,
     # ... Diğer eklentilerin buraya eklenecek
 }
 
@@ -190,7 +197,8 @@ addon_categories = {
     '🎨 Çizgi Film': ['cizgimax', 'cizgivedizi'],
     '📚 Belgesel': ['belgeselx'],
     '📺 Canlı TV & Programlar': ['inatbox', 'canlitv', 'tv8', 'kicktr'],
-    '⚽ Spor': ['selcuksports', 'sporcafe', 'webspor']
+    '⚽ Spor': ['selcuksports', 'sporcafe', 'webspor'],
+    '🌐 Platformlar': ['youtube']
 }
 
 for category, ids in addon_categories.items():
