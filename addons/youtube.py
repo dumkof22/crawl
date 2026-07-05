@@ -71,16 +71,13 @@ class YouTubeScraper:
 
     async def handleStream(self, args):
         video_id = args.get('id', '').replace('youtube:', '')
-        randomId = ''.join(random.choices('abcdefghijklmnopqrstuvwxyz0123456789', k=8))
         
         return {
-            'instructions': [{
-                'requestId': f"yt-stream-{int(time.time()*1000)}-{randomId}",
-                'purpose': 'stream_extract',
-                'url': 'https://www.youtube.com',
-                'method': 'GET',
-                'headers': {'User-Agent': 'Mozilla/5.0'},
-                'metadata': {'videoId': video_id}
+            'streams': [{
+                'ytId': video_id,
+                'name': 'YouTube',
+                'title': 'YouTube Video',
+                'behaviorHints': {'notWebReady': False}
             }]
         }
 
@@ -162,70 +159,5 @@ class YouTubeScraper:
                 'description': desc
             }
             return {'meta': meta}
-
-        elif purpose == 'stream_extract':
-            video_id = metadata.get('videoId')
-            def _get_stream():
-                ydl_opts = {
-                    'quiet': True,
-                    'no_warnings': True,
-                    'skip_download': True,
-                    'remote_components': ['ejs:github'],
-                    'js_runtimes': {'node': {}}
-                }
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    try:
-                        info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
-                        
-                        formats = info.get('formats', [])
-                        streams = []
-                        combined = []
-                        
-                        for f in formats:
-                            if f.get('vcodec') != 'none' and f.get('acodec') != 'none' and f.get('url'):
-                                combined.append(f)
-                                
-                        # Yüksek kaliteden düşüğe doğru sırala
-                        combined.sort(key=lambda x: x.get('height', 0) or 0, reverse=True)
-                        
-                        added_heights = set()
-                        for f in combined:
-                            height = f.get('height')
-                            if not height or height in added_heights:
-                                continue
-                            added_heights.add(height)
-                            
-                            quality_name = f"{height}p"
-                            streams.append({
-                                'url': f.get('url'),
-                                'name': f"YouTube\n{quality_name}",
-                                'title': f"YouTube - {quality_name} (Direkt)",
-                                'behaviorHints': {'notWebReady': False}
-                            })
-                            
-                        # Eğer hiçbir birleşik format bulamazsa yt-dlp'nin best formatını dön
-                        if not streams and info.get('url'):
-                            streams.append({
-                                'url': info.get('url'),
-                                'name': 'YouTube\nOtomatik',
-                                'title': 'YouTube - Otomatik Kalite',
-                                'behaviorHints': {'notWebReady': False}
-                            })
-                            
-                        return streams
-                    except Exception as e:
-                        print(f"yt-dlp stream error: {e}")
-                        return None
-                        
-            streams = await asyncio.to_thread(_get_stream)
-            if not streams:
-                streams = [{
-                    'ytId': video_id,
-                    'externalUrl': f'https://youtube.com/watch?v={video_id}',
-                    'name': 'YouTube\nHata',
-                    'title': 'YouTube Oynatıcı (Hata)',
-                    'behaviorHints': {'notWebReady': True}
-                }]
-            return {'streams': streams}
 
         return {'ok': True}
