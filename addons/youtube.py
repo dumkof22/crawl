@@ -31,16 +31,24 @@ class YouTubeScraper:
         searchQuery = extra.get('search')
         skip = int(extra.get('skip', 0))
         
-        # Flutter'ın algılayabilmesi için zorunlu olarak instruction dönüyoruz.
-        # processFetchResult tarafında HTML'i yoksayıp yt-dlp ile işi çözeceğiz.
+        url = "https://www.youtube.com/feed/trending"
+        if catalogId == 'youtube_mrbeast':
+            url = "https://www.youtube.com/@MrBeast/videos"
+        elif catalogId == 'youtube_music':
+            url = "https://www.youtube.com/results?search_query=music+pop+hits"
+        elif catalogId == 'youtube_search' and searchQuery:
+            import urllib.parse
+            encoded_query = urllib.parse.quote(searchQuery)
+            url = f"https://www.youtube.com/results?search_query={encoded_query}"
+            
         randomId = ''.join(random.choices('abcdefghijklmnopqrstuvwxyz0123456789', k=8))
         return {
             'instructions': [{
                 'requestId': f"yt-cat-{int(time.time()*1000)}-{randomId}",
                 'purpose': 'catalog',
-                'url': 'https://www.youtube.com',
+                'url': url,
                 'method': 'GET',
-                'headers': {'User-Agent': 'Mozilla/5.0'},
+                'headers': {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'},
                 'metadata': {'catalogId': catalogId, 'searchQuery': searchQuery, 'skip': skip}
             }]
         }
@@ -54,9 +62,9 @@ class YouTubeScraper:
             'instructions': [{
                 'requestId': f"yt-meta-{int(time.time()*1000)}-{randomId}",
                 'purpose': 'meta',
-                'url': 'https://www.youtube.com',
+                'url': f"https://www.youtube.com/watch?v={video_id}",
                 'method': 'GET',
-                'headers': {'User-Agent': 'Mozilla/5.0'},
+                'headers': {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'},
                 'metadata': {'videoId': video_id}
             }]
         }
@@ -87,84 +95,72 @@ class YouTubeScraper:
             return {'ok': False, 'error': 'yt-dlp eksik'}
             
         if purpose == 'catalog':
-            catalogId = metadata.get('catalogId')
-            searchQuery = metadata.get('searchQuery')
+            html = fetchResult.get('body', '')
+            if not html: html = ""
             skip = int(metadata.get('skip', 0))
             
-            def _get_catalog():
-                ydl_opts = {'extract_flat': True, 'quiet': True}
-                url = ""
-                if catalogId == 'youtube_trending':
-                    url = "ytsearch20:trending videos 2025"
-                elif catalogId == 'youtube_mrbeast':
-                    url = "https://www.youtube.com/@MrBeast/videos"
-                elif catalogId == 'youtube_music':
-                    url = "ytsearch20:music pop hits"
-                elif catalogId == 'youtube_search' and searchQuery:
-                    url = f"ytsearch20:{searchQuery}"
-                    
-                if not url: return []
+            import re
+            videos = []
+            
+            matches = re.finditer(r'"videoId":"([^"]+)".*?"title":\{"runs":\[\{"text":"(.*?)"\}\]', html)
+            for match in matches:
+                vid = match.group(1)
+                title = match.group(2)
                 
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                if len(vid) == 11 and not any(v['id'] == f"youtube:{vid}" for v in videos):
                     try:
-                        info = ydl.extract_info(url, download=False)
-                        entries = info.get('entries', [])
-                        if not entries and 'title' in info:
-                            entries = [info]
-                            
-                        metas = []
-                        for entry in entries[skip:skip+20]:
-                            if not entry.get('id'): continue
-                            poster = f"https://img.youtube.com/vi/{entry['id']}/hqdefault.jpg"
-                            desc = ""
-                            if entry.get('view_count'): desc += f"İzlenme: {entry['view_count']:,} | "
-                            if entry.get('duration'): desc += f"Süre: {int(entry['duration']//60)}:{int(entry['duration']%60):02d} | "
-                            if entry.get('uploader'): desc += f"Kanal: {entry['uploader']}"
-                            
-                            metas.append({
-                                'id': f"youtube:{entry['id']}",
-                                'type': 'movie',
-                                'name': entry.get('title', 'Video'),
-                                'poster': poster,
-                                'description': desc.strip(' | ')
-                            })
-                        return metas
-                    except Exception as e:
-                        print(f"yt-dlp catalog error: {e}")
-                        return []
+                        clean_title = title.encode('utf-8').decode('unicode_escape') if '\\u' in title else title
+                    except:
+                        clean_title = title
                         
-            metas = await asyncio.to_thread(_get_catalog)
-            return {'metas': metas}
+                    videos.append({
+                        'id': f"youtube:{vid}",
+                        'type': 'movie',
+                        'name': clean_title,
+                        'poster': f"https://img.youtube.com/vi/{vid}/hqdefault.jpg",
+                        'description': 'YouTube Video'
+                    })
+                    
+            return {'metas': videos[skip:skip+20]}
 
         elif purpose == 'meta':
             video_id = metadata.get('videoId')
-            def _get_meta():
-                ydl_opts = {'quiet': True, 'skip_download': True, 'extract_flat': True}
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    try:
-                        info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
-                        poster = f"https://img.youtube.com/vi/{video_id}/maxresdefault.jpg"
-                        return {
-                            'id': f'youtube:{video_id}',
-                            'type': 'movie',
-                            'name': info.get('title', 'YouTube Video'),
-                            'poster': poster,
-                            'background': poster,
-                            'description': info.get('description', 'Açıklama bulunamadı.'),
-                            'releaseInfo': info.get('upload_date', '')
-                        }
-                    except:
-                        return None
-                        
-            meta = await asyncio.to_thread(_get_meta)
-            if not meta:
-                meta = {
-                    'id': f'youtube:{video_id}',
-                    'type': 'movie',
-                    'name': 'YouTube Video',
-                    'poster': f"https://img.youtube.com/vi/{video_id}/maxresdefault.jpg",
-                    'description': 'Detaylar alınamadı.'
-                }
+            html = fetchResult.get('body', '')
+            if not html: html = ""
+            
+            import re
+            title = "YouTube Video"
+            title_match = re.search(r'"videoPrimaryInfoRenderer":\{"title":\{"runs":\[\{"text":"(.*?)"\}\]', html)
+            if title_match:
+                title = title_match.group(1)
+                try:
+                    title = title.encode('utf-8').decode('unicode_escape') if '\\u' in title else title
+                except:
+                    pass
+            elif '<title>' in html:
+                t_match = re.search(r'<title>(.*?)</title>', html)
+                if t_match:
+                    title = t_match.group(1).replace(' - YouTube', '')
+                    
+            desc = "Detaylar alınamadı."
+            desc_match = re.search(r'"description":\{"runs":\[(.*?)\]\}', html)
+            if desc_match:
+                runs = desc_match.group(1)
+                texts = re.findall(r'"text":"(.*?)"', runs)
+                desc = "".join(texts)[:500]
+                try:
+                    desc = desc.encode('utf-8').decode('unicode_escape') if '\\u' in desc else desc
+                except:
+                    pass
+            
+            meta = {
+                'id': f'youtube:{video_id}',
+                'type': 'movie',
+                'name': title,
+                'poster': f"https://img.youtube.com/vi/{video_id}/maxresdefault.jpg",
+                'background': f"https://img.youtube.com/vi/{video_id}/maxresdefault.jpg",
+                'description': desc
+            }
             return {'meta': meta}
 
         elif purpose == 'stream_extract':
