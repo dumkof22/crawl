@@ -5,10 +5,13 @@ import random
 import time
 import hashlib
 from bs4 import BeautifulSoup
-from Crypto.Cipher import AES
 
 def cryptojs_decrypt(password, cipher_text):
     try:
+        from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+        from cryptography.hazmat.backends import default_backend
+        from cryptography.hazmat.primitives import padding
+        
         ct_bytes = base64.b64decode(cipher_text)
         salt_bytes = ct_bytes[8:16]
         cipher_text_bytes = ct_bytes[16:]
@@ -22,11 +25,13 @@ def cryptojs_decrypt(password, cipher_text):
         key = derived_bytes[:key_size]
         iv = derived_bytes[key_size:key_size + iv_size]
 
-        cipher = AES.new(key, AES.MODE_CBC, iv)
-        decrypted_padded = cipher.decrypt(cipher_text_bytes)
+        cipher = Cipher(algorithms.AES(key), modes.CBC(iv), backend=default_backend())
+        decryptor = cipher.decryptor()
         
-        pad_len = decrypted_padded[-1]
-        decrypted = decrypted_padded[:-pad_len]
+        decrypted_padded = decryptor.update(cipher_text_bytes) + decryptor.finalize()
+        unpadder = padding.PKCS7(algorithms.AES.block_size).unpadder()
+        decrypted = unpadder.update(decrypted_padded) + unpadder.finalize()
+        
         return decrypted.decode('utf-8')
     except Exception as e:
         print(f"❌ CryptoJS decrypt error: {e}")
@@ -63,7 +68,7 @@ class DiziBoxScraper:
             'description': 'Türkçe dizi izleme platformu - DiziBox için Stremio eklentisi (Instruction Mode)',
             'logo': 'https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTy_DY_ss3ztVcluDRxvnc45u9o0labczkN4GXDo_fYs12zD_l9ylx5PhK71d1hzSAnDQ&usqp=CAU',
             'resources': ['catalog', 'meta', 'stream'],
-            'types': ['series'],
+            'types': ['movie', 'series'],
             'catalogs': [
                 {'type': 'series', 'id': 'dizibox_new', 'name': 'Son Eklenenler', 'extra': [{'name': 'skip', 'isRequired': False}]},
                 {'type': 'series', 'id': 'dizibox_yerli', 'name': 'Yerli Diziler', 'extra': [{'name': 'skip', 'isRequired': False}]},
@@ -75,7 +80,8 @@ class DiziBoxScraper:
                 {'type': 'series', 'id': 'dizibox_thriller', 'name': 'Gerilim', 'extra': [{'name': 'skip', 'isRequired': False}]},
                 {'type': 'series', 'id': 'dizibox_fantasy', 'name': 'Fantastik', 'extra': [{'name': 'skip', 'isRequired': False}]},
                 {'type': 'series', 'id': 'dizibox_crime', 'name': 'Suç', 'extra': [{'name': 'skip', 'isRequired': False}]},
-                {'type': 'series', 'id': 'dizibox_search', 'name': 'Dizi Ara', 'extra': [{'name': 'search', 'isRequired': True}, {'name': 'skip', 'isRequired': False}]}
+                {'type': 'series', 'id': 'dizibox_search', 'name': 'Dizi Ara', 'extra': [{'name': 'search', 'isRequired': True}]},
+                {'type': 'movie', 'id': 'dizibox_movie_search', 'name': 'Film Ara', 'extra': [{'name': 'search', 'isRequired': True}]}
             ],
             'idPrefixes': ['dizibox']
         }
@@ -363,63 +369,52 @@ class DiziBoxScraper:
 
         if purpose == 'meta':
             soup = BeautifulSoup(body, 'html.parser')
-            title_el = soup.select_one('div.tv-overview h1 a')
-            if not title_el:
-                title_el = soup.select_one('div.tv-overview h1')
-            if not title_el: return {'meta': None}
-            title = title_el.text.strip()
             
-            # Poster: img.main-cover src kullanıyor
+            title = 'Unknown'
+            title_el = soup.select_one('h1')
+            if title_el:
+                title = title_el.text.strip()
+            
+            # Poster
             poster = None
-            for selector in ['img.main-cover', 'div.tv-overview img.main-cover', 'a.figure-link img.afis', 'div.tv-overview img', 'figure.poster img', 'img.poster']:
-                img_el = soup.select_one(selector)
-                if img_el:
-                    posterUrl = img_el.get('src') or img_el.get('data-src') or img_el.get('data-lazy-src')
-                    if posterUrl and not posterUrl.startswith('data:'):
-                        poster = posterUrl
-                        break
+            poster_el = soup.select_one('img.main-cover') or soup.select_one('figure.poster img')
+            if poster_el:
+                poster = poster_el.get('src') or poster_el.get('data-src')
             if not poster:
                 og = soup.select_one('meta[property="og:image"]')
                 if og: poster = og.get('content')
-                
             if poster and not poster.startswith('http'):
                 poster = f"{self.BASE_URL}{poster}" if poster.startswith('/') else f"{self.BASE_URL}/{poster}"
                 
-            # Description: div.tv-story icinde dogrudan metin (p tag'i olmayabilir)
+            # Description
             description = 'Aciklama mevcut degil'
-            desc_el = soup.select_one('div.tv-story')
+            desc_el = soup.select_one('div.tv-story') or soup.select_one('.series-summary p') or soup.select_one('.summary')
             if desc_el:
-                # Once p tag'i dene, yoksa dogrudan text al
-                p_el = desc_el.find('p')
-                if p_el:
-                    description = p_el.text.strip()
-                else:
-                    description = desc_el.get_text(separator='\n', strip=True)
+                description = desc_el.text.strip()
             
+            # Genres, Actors, Year
             year = None
-            year_el = soup.select_one('a[href*="/yil/"]')
-            if year_el:
-                try: year = int(year_el.text.strip())
-                except: pass
-                
-            tags = [el.text.strip() for el in soup.select('a[href*="/tur/"]')]
+            tags = []
+            cast = []
+            terms_div = soup.select_one('div.terms')
+            if terms_div:
+                parts = [p.strip() for p in terms_div.text.split('|')]
+                for p in parts:
+                    if p.isdigit() and len(p) == 4:
+                        year = int(p)
+                    elif ',' in p and not any(k in p.lower() for k in ['dram', 'kurgu', 'aksiyon', 'komedi', 'gerilim']):
+                        cast = [a.strip() for a in p.split(',')]
+                    elif ' ' not in p or ',' in p:
+                        tags = [t.strip() for t in p.split(',')]
             
-            # IMDB: span.label-imdb > b formatinda
+            # IMDB
             imdbRating = None
-            rating_el = soup.select_one('span.label-imdb b')
-            if rating_el:
-                try: imdbRating = str(float(rating_el.text.strip()))
+            imdb_el = soup.select_one('span.label')
+            if imdb_el and 'imdb:' in imdb_el.text.lower():
+                try: imdbRating = str(float(imdb_el.text.lower().replace('imdb:', '').strip()))
                 except: pass
-            if not imdbRating:
-                rating_el2 = soup.select_one('span.label-imdb')
-                if rating_el2:
-                    import re
-                    m = re.search(r'([\d.]+)', rating_el2.text)
-                    if m:
-                        try: imdbRating = str(float(m.group(1)))
-                        except: pass
-                
-            cast = [el.text.strip() for el in soup.select('a[href*="/oyuncu/"]')]
+            
+            # cast = [el.text.strip() for el in soup.select('a[href*="/oyuncu/"]')]
             
             # Bolumleri cek: article.grid-box veya article.grid-four
             import re
@@ -475,7 +470,17 @@ class DiziBoxScraper:
                         'url': link,
                         'method': 'GET',
                         'headers': self.get_default_headers(url),
-                        'metadata': {'seriesUrl': url, 'seriesTitle': title, 'poster': poster, 'hiddenweb': True}
+                        'metadata': {
+                            'seriesUrl': url, 
+                            'seriesTitle': title, 
+                            'poster': poster,
+                            'description': description,
+                            'tags': tags,
+                            'cast': cast,
+                            'imdbRating': imdbRating,
+                            'year': str(year) if year else None,
+                            'hiddenweb': True
+                        }
                     })
                 return {'instructions': instructions, 'partialMeta': metaObj}
                 
@@ -504,14 +509,18 @@ class DiziBoxScraper:
                     
             seriesTitle = metadata.get('seriesTitle', 'Dizi')
             seriesUrl = metadata.get('seriesUrl', url)
-            poster = metadata.get('poster')
             
             return {
                 'meta': {
                     'id': 'dizibox:' + base64.b64encode(seriesUrl.encode('utf-8')).decode('utf-8').replace('=', ''),
                     'type': 'series',
                     'name': seriesTitle,
-                    'poster': poster,
+                    'poster': metadata.get('poster'),
+                    'description': metadata.get('description'),
+                    'genres': metadata.get('tags', []),
+                    'cast': metadata.get('cast', []),
+                    'imdbRating': metadata.get('imdbRating'),
+                    'releaseInfo': metadata.get('year'),
                     'videos': videos
                 }
             }
@@ -527,18 +536,47 @@ class DiziBoxScraper:
             mainIframeUrl = iframeSrc if iframeSrc.startswith('http') else f"{self.BASE_URL}{iframeSrc}"
             mainIframeUrl = add_wmode_opaque(mainIframeUrl)
             
-            # Sadece ana sunucuyu kullan - alt sunucular ek gecikme yaratiyor
+            # Ana sunucu
+            instructions = []
             randomId = ''.join(random.choices('abcdefghijklmnopqrstuvwxyz0123456789', k=8))
-            return {
-                'instructions': [{
-                    'requestId': f"dizibox-iframe-{int(time.time()*1000)}-{randomId}",
-                    'purpose': 'iframe-extract',
-                    'url': mainIframeUrl,
-                    'method': 'GET',
-                    'headers': self.get_default_headers(url),
-                    'metadata': {'originalUrl': url, 'streamName': 'DiziBox', 'hiddenweb': True}
-                }]
-            }
+            
+            main_name = 'DiziBox'
+            select_el = soup.select_one('select.woca-linkpages-dd')
+            if select_el:
+                first_opt = select_el.find('option')
+                if first_opt: main_name = first_opt.text.strip()
+                
+                for opt in select_el.find_all('option'):
+                    if opt.get('selected') == 'selected' or not opt.get('value'):
+                        main_name = opt.text.strip()
+                        break
+                        
+            instructions.append({
+                'requestId': f"dizibox-iframe-{int(time.time()*1000)}-{randomId}-0",
+                'purpose': 'iframe-extract',
+                'url': mainIframeUrl,
+                'method': 'GET',
+                'headers': self.get_default_headers(url),
+                'metadata': {'originalUrl': url, 'streamName': main_name, 'hiddenweb': True}
+            })
+            
+            # Alternatif sunuculari ekle
+            if select_el:
+                idx = 1
+                for opt in select_el.find_all('option'):
+                    val = opt.get('value')
+                    if val and val.startswith('http') and 'izle' in val and opt.get('selected') != 'selected':
+                        instructions.append({
+                            'requestId': f"dizibox-alt-{int(time.time()*1000)}-{randomId}-{idx}",
+                            'purpose': 'alternative-page',
+                            'url': val,
+                            'method': 'GET',
+                            'headers': self.get_default_headers(url),
+                            'metadata': {'originalUrl': url, 'streamName': opt.text.strip(), 'hiddenweb': True}
+                        })
+                        idx += 1
+                        
+            return {'instructions': instructions}
 
         if purpose == 'alternative-page':
             soup = BeautifulSoup(body, 'html.parser')
@@ -571,7 +609,7 @@ class DiziBoxScraper:
                 sheilaUrl = fullIframeUrl.replace('/embed/', '/embed/sheila/').replace('vidmoly.me', 'vidmoly.net')
                 
                 randomId = ''.join(random.choices('abcdefghijklmnopqrstuvwxyz0123456789', k=8))
-                if 'dbx.molystream' in sheilaUrl:
+                if 'dbx.molystream' in fullIframeUrl or 'vidmoly' in fullIframeUrl:
                     return {
                         'instructions': [{
                             'requestId': f"dizibox-molystream-{int(time.time()*1000)}-{randomId}",
@@ -590,7 +628,7 @@ class DiziBoxScraper:
                         'url': sheilaUrl,
                         'method': 'GET',
                         'headers': self.get_default_headers(url),
-                        'metadata': {'streamName': streamName, 'embedUrl': fullIframeUrl, 'hiddenweb': True}
+                        'metadata': {'streamName': streamName, 'embedUrl': fullIframeUrl, 'originalUrl': metadata.get('originalUrl', url), 'hiddenweb': True}
                     }]
                 }
                 
@@ -604,40 +642,24 @@ class DiziBoxScraper:
                         'url': anyIframe.get('src'),
                         'method': 'GET',
                         'headers': self.get_default_headers(url),
-                        'metadata': {'streamName': streamName, 'hiddenweb': True}
+                        'metadata': {'streamName': streamName, 'originalUrl': metadata.get('originalUrl', url), 'hiddenweb': True}
                     }]
                 }
-            return {'streams': []}
-
-        if purpose == 'molystream-direct':
+                
+            # If no iframe, maybe the current page IS the player (e.g. king.php without iframe)
             import re
-            m3uMatch = re.search(r'file\s*:\s*["\'](.*?\.m3u8.*?)["\']', body)
-            if m3uMatch:
-                return {'streams': [{
-                    'name': metadata.get('streamName', 'DiziBox'),
-                    'title': 'Auto',
-                    'url': m3uMatch.group(1),
-                    'type': 'm3u8',
-                    'behaviorHints': {'notWebReady': False}
-                }]}
-            return {'streams': []}
-
-        if purpose == 'iframe-stream':
-            import re
-            streamName = metadata.get('streamName', 'DiziBox')
-            
             cryptMatch = re.search(r'CryptoJS\.AES\.decrypt\(["\'](.+?)["\'],\s*["\'](.+?)["\']\)', body)
+            randomId = ''.join(random.choices('abcdefghijklmnopqrstuvwxyz0123456789', k=8))
             if cryptMatch:
                 encryptedData = cryptMatch.group(1)
                 password = cryptMatch.group(2)
-                randomId = ''.join(random.choices('abcdefghijklmnopqrstuvwxyz0123456789', k=8))
                 return {
                     'instructions': [{
                         'requestId': f"dizibox-decrypt-{int(time.time()*1000)}-{randomId}",
                         'purpose': 'king-decrypt',
                         'url': url,
                         'method': 'GET',
-                        'metadata': {'streamName': streamName, 'encryptedData': encryptedData, 'password': password, 'body': body, 'hiddenweb': True}
+                        'metadata': {'streamName': streamName, 'encryptedData': encryptedData, 'password': password, 'body': body, 'originalUrl': metadata.get('originalUrl', url), 'hiddenweb': True}
                     }]
                 }
                 
@@ -648,12 +670,219 @@ class DiziBoxScraper:
             if not m3uMatch: m3uMatch = re.search(r'(https?://[^\s"\'<>()]+\.m3u8[^\s"\'<>()]*)', body)
             
             if m3uMatch:
+                subtitles = []
+                subUrls = set()
+                tracks_match = re.search(r'tracks\s*:\s*(\[[\s\S]*?\])\s*[,}]', body)
+                if tracks_match:
+                    try:
+                        import json
+                        tracksData = json.loads(tracks_match.group(1))
+                        for track in tracksData:
+                            if track.get('kind') in ['captions', 'subtitles'] and track.get('file'):
+                                subUrl = track['file'].replace('\\/', '/').replace('\\u0026', '&').replace('\\', '')
+                                subLang = (track.get('label') or track.get('language') or 'Türkçe')
+                                if subUrl not in subUrls:
+                                    subUrls.add(subUrl)
+                                    subtitles.append({
+                                        'id': subLang.lower().replace(' ', '_'),
+                                        'url': subUrl if subUrl.startswith('http') else f"https:{subUrl}" if subUrl.startswith('//') else f"{self.BASE_URL}{subUrl}" if subUrl.startswith('/') else subUrl,
+                                        'lang': subLang
+                                    })
+                    except: pass
+                if not subtitles:
+                    subRegex = r'"file":"((?:\\\\"|[^"])+)"(?:,"kind":"captions")?,"label":"((?:\\\\"|[^"])+)"'
+                    for match in re.finditer(subRegex, body):
+                        subUrlRaw = match.group(1)
+                        subLangRaw = match.group(2)
+                        subUrl = subUrlRaw.replace('\\/', '/').replace('\\', '')
+                        if subUrl not in subUrls:
+                            subUrls.add(subUrl)
+                            subtitles.append({
+                                'id': subLangRaw.lower().replace(' ', '_'),
+                                'url': subUrl if subUrl.startswith('http') else f"https:{subUrl}" if subUrl.startswith('//') else f"{self.BASE_URL}{subUrl}" if subUrl.startswith('/') else subUrl,
+                                'lang': subLangRaw
+                            })
+
                 return {'streams': [{
                     'name': streamName,
                     'title': streamName,
                     'url': m3uMatch.group(1),
                     'type': 'm3u8',
-                    'behaviorHints': {'notWebReady': False}
+                    'subtitles': subtitles,
+                    'behaviorHints': {
+                        'notWebReady': False,
+                        'proxyHeaders': {
+                            'request': {
+                                'Referer': metadata.get('originalUrl', url),
+                                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                            }
+                        }
+                    }
+                }]}
+            return {'streams': []}
+
+        if purpose == 'molystream-direct':
+            import os
+            try:
+                with open('/tmp/dizibox_moly.html', 'w', encoding='utf-8') as f:
+                    f.write(body)
+            except: pass
+            
+            import re
+            import json
+            
+            iframeSubtitles = []
+            subUrls = set()
+            
+            # Extract subtitles
+            tracks_match = re.search(r'tracks\s*:\s*(\[[\s\S]*?\])\s*[,}]', body)
+            if tracks_match:
+                try:
+                    tracksData = json.loads(tracks_match.group(1))
+                    for track in tracksData:
+                        if track.get('kind') in ['captions', 'subtitles'] and track.get('file'):
+                            subUrl = track['file'].replace('\\/', '/').replace('\\u0026', '&').replace('\\', '')
+                            subLang = (track.get('label') or track.get('language') or 'Türkçe')
+                            if subUrl not in subUrls:
+                                subUrls.add(subUrl)
+                                iframeSubtitles.append({
+                                    'id': subLang.lower().replace(' ', '_'),
+                                    'url': subUrl if subUrl.startswith('http') else f"https:{subUrl}",
+                                    'lang': subLang
+                                })
+                except Exception as e:
+                    print(f"⚠️  Tracks parse error: {e}")
+                    
+            if not iframeSubtitles:
+                subRegex = r'"file":"((?:\\\\"|[^"])+)"(?:,"kind":"captions")?,"label":"((?:\\\\"|[^"])+)"'
+                for match in re.finditer(subRegex, body):
+                    subUrlRaw = match.group(1)
+                    subLangRaw = match.group(2)
+                    subUrl = subUrlRaw.replace('\\/', '/').replace('\\', '')
+                    if subUrl not in subUrls:
+                        subUrls.add(subUrl)
+                        iframeSubtitles.append({
+                            'id': subLangRaw.lower().replace(' ', '_'),
+                            'url': subUrl if subUrl.startswith('http') else f"https:{subUrl}",
+                            'lang': subLangRaw
+                        })
+            
+            # Extract video streams
+            m3uMatches = re.findall(r'file\s*:\s*["\']([^"\']+\.m3u8[^"\']*)["\']', body)
+            streams = []
+            for i, m in enumerate(m3uMatches):
+                streams.append({
+                    'name': metadata.get('streamName', 'DiziBox'),
+                    'title': f'Auto {i+1}' if len(m3uMatches) > 1 else 'Auto',
+                    'url': m,
+                    'type': 'm3u8',
+                    'subtitles': iframeSubtitles,
+                    'behaviorHints': {
+                        'notWebReady': False,
+                        'proxyHeaders': {
+                            'request': {
+                                'Referer': metadata.get('embedUrl', ''),
+                                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                            }
+                        }
+                    }
+                })
+            
+            # Fallback for direct EXTM3U
+            if not streams and '#EXTM3U' in body:
+                streams.append({
+                    'name': metadata.get('streamName', 'DiziBox'),
+                    'title': 'Auto',
+                    'url': url,
+                    'type': 'm3u8',
+                    'subtitles': iframeSubtitles,
+                    'behaviorHints': {
+                        'notWebReady': False,
+                        'proxyHeaders': {
+                            'request': {
+                                'Referer': metadata.get('embedUrl', ''),
+                                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                            }
+                        }
+                    }
+                })
+                
+            return {'streams': streams}
+
+        if purpose == 'iframe-stream':
+            import re
+            streamName = metadata.get('streamName', 'DiziBox')
+            
+            cryptMatch = re.search(r'CryptoJS\.AES\.decrypt\(["\'](.+?)["\'],\s*["\'](.+?)["\']\)', body)
+            randomId = ''.join(random.choices('abcdefghijklmnopqrstuvwxyz0123456789', k=8))
+            if cryptMatch:
+                encryptedData = cryptMatch.group(1)
+                password = cryptMatch.group(2)
+                return {
+                    'instructions': [{
+                        'requestId': f"dizibox-decrypt-{int(time.time()*1000)}-{randomId}",
+                        'purpose': 'king-decrypt',
+                        'url': url,
+                        'method': 'GET',
+                        'metadata': {'streamName': streamName, 'encryptedData': encryptedData, 'password': password, 'body': body, 'originalUrl': metadata.get('originalUrl', url), 'hiddenweb': True}
+                    }]
+                }
+                
+            m3uMatch = re.search(r'file:\s*["\']([^"\']+\.m3u8[^"\']*)["\']', body)
+            if not m3uMatch: m3uMatch = re.search(r'"file"\s*:\s*"([^"]+\.m3u8[^"]*)"', body)
+            if not m3uMatch: m3uMatch = re.search(r'source:\s*["\']([^"\']+\.m3u8[^"\']*)["\']', body)
+            if not m3uMatch: m3uMatch = re.search(r'sources:\s*\[\s*["\']([^"\']+\.m3u8[^"\']*)["\']', body)
+            if not m3uMatch: m3uMatch = re.search(r'(https?://[^\s"\'<>()]+\.m3u8[^\s"\'<>()]*)', body)
+            
+            if m3uMatch:
+                subtitles = []
+                subUrls = set()
+                tracks_match = re.search(r'tracks\s*:\s*(\[[\s\S]*?\])\s*[,}]', body)
+                if tracks_match:
+                    try:
+                        import json
+                        tracksData = json.loads(tracks_match.group(1))
+                        for track in tracksData:
+                            if track.get('kind') in ['captions', 'subtitles'] and track.get('file'):
+                                subUrl = track['file'].replace('\\/', '/').replace('\\u0026', '&').replace('\\', '')
+                                subLang = (track.get('label') or track.get('language') or 'Türkçe')
+                                if subUrl not in subUrls:
+                                    subUrls.add(subUrl)
+                                    subtitles.append({
+                                        'id': subLang.lower().replace(' ', '_'),
+                                        'url': subUrl if subUrl.startswith('http') else f"https:{subUrl}" if subUrl.startswith('//') else f"{self.BASE_URL}{subUrl}" if subUrl.startswith('/') else subUrl,
+                                        'lang': subLang
+                                    })
+                    except: pass
+                if not subtitles:
+                    subRegex = r'"file":"((?:\\\\"|[^"])+)"(?:,"kind":"captions")?,"label":"((?:\\\\"|[^"])+)"'
+                    for match in re.finditer(subRegex, body):
+                        subUrlRaw = match.group(1)
+                        subLangRaw = match.group(2)
+                        subUrl = subUrlRaw.replace('\\/', '/').replace('\\', '')
+                        if subUrl not in subUrls:
+                            subUrls.add(subUrl)
+                            subtitles.append({
+                                'id': subLangRaw.lower().replace(' ', '_'),
+                                'url': subUrl if subUrl.startswith('http') else f"https:{subUrl}" if subUrl.startswith('//') else f"{self.BASE_URL}{subUrl}" if subUrl.startswith('/') else subUrl,
+                                'lang': subLangRaw
+                            })
+
+                return {'streams': [{
+                    'name': streamName,
+                    'title': streamName,
+                    'url': m3uMatch.group(1),
+                    'type': 'm3u8',
+                    'subtitles': subtitles,
+                    'behaviorHints': {
+                        'notWebReady': False,
+                        'proxyHeaders': {
+                            'request': {
+                                'Referer': metadata.get('originalUrl', url),
+                                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                            }
+                        }
+                    }
                 }]}
             return {'streams': []}
 
@@ -669,12 +898,59 @@ class DiziBoxScraper:
                     import re
                     m3uMatch = re.search(r'(https?://[^\s"\'<>()]+\.m3u8[^\s"\'<>()]*)', decrypted)
                     if m3uMatch:
+                        subtitles = []
+                        subUrls = set()
+                        
+                        # Extract subtitles
+                        tracks_match = re.search(r'tracks\s*:\s*(\[[\s\S]*?\])\s*[,}]', orig_body)
+                        if not tracks_match: tracks_match = re.search(r'tracks\s*:\s*(\[[\s\S]*?\])\s*[,}]', decrypted)
+                        
+                        if tracks_match:
+                            try:
+                                import json
+                                tracksData = json.loads(tracks_match.group(1))
+                                for track in tracksData:
+                                    if track.get('kind') in ['captions', 'subtitles'] and track.get('file'):
+                                        subUrl = track['file'].replace('\\/', '/').replace('\\u0026', '&').replace('\\', '')
+                                        subLang = (track.get('label') or track.get('language') or 'Türkçe')
+                                        if subUrl not in subUrls:
+                                            subUrls.add(subUrl)
+                                            subtitles.append({
+                                                'id': subLang.lower().replace(' ', '_'),
+                                                'url': subUrl if subUrl.startswith('http') else f"https:{subUrl}" if subUrl.startswith('//') else f"{self.BASE_URL}{subUrl}" if subUrl.startswith('/') else subUrl,
+                                                'lang': subLang
+                                            })
+                            except: pass
+                            
+                        if not subtitles:
+                            subRegex = r'"file":"((?:\\\\"|[^"])+)"(?:,"kind":"captions")?,"label":"((?:\\\\"|[^"])+)"'
+                            for match in re.finditer(subRegex, orig_body):
+                                subUrlRaw = match.group(1)
+                                subLangRaw = match.group(2)
+                                subUrl = subUrlRaw.replace('\\/', '/').replace('\\', '')
+                                if subUrl not in subUrls:
+                                    subUrls.add(subUrl)
+                                    subtitles.append({
+                                        'id': subLangRaw.lower().replace(' ', '_'),
+                                        'url': subUrl if subUrl.startswith('http') else f"https:{subUrl}" if subUrl.startswith('//') else f"{self.BASE_URL}{subUrl}" if subUrl.startswith('/') else subUrl,
+                                        'lang': subLangRaw
+                                    })
+                                    
                         return {'streams': [{
                             'name': streamName,
                             'title': 'Auto (Decrypted)',
                             'url': m3uMatch.group(1),
                             'type': 'm3u8',
-                            'behaviorHints': {'notWebReady': False}
+                            'subtitles': subtitles,
+                            'behaviorHints': {
+                                'notWebReady': False,
+                                'proxyHeaders': {
+                                    'request': {
+                                        'Referer': metadata.get('originalUrl', 'https://www.dizibox.live/'),
+                                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                                    }
+                                }
+                            }
                         }]}
             return {'streams': []}
 

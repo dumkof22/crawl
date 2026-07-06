@@ -2,7 +2,6 @@ import base64
 import json
 import re
 import urllib.parse
-import urllib.request
 import random
 import time
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
@@ -39,9 +38,7 @@ def decrypt_aes(encrypted_data_with_iv, key_str):
         print(f"🐛 [InatBox Debug] Decrypted data successfully. Length: {len(dec2)}")
         return dec2.decode('utf8')
     except Exception as e:
-        import traceback
         print(f"❌ Decryption error: {e}")
-        traceback.print_exc()
         return None
 
 def vk_source_fix(url):
@@ -355,6 +352,9 @@ class InatBoxScraper:
                     referer = chHeaders[0].get('Referer', referer)
                     ua = chHeaders[0].get('UserAgent', ua)
             except Exception as e: print("EXCEPTION IN LOOP:", e)
+            
+            if 'vk.com' in extractUrl:
+                ua = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36'
             
             if '.m3u8' in extractUrl or '.mpd' in extractUrl:
                 print(f"🐛 [InatBox Debug] Returning direct stream link: {extractUrl}")
@@ -827,7 +827,8 @@ class InatBoxScraper:
             item = metadata.get('originalItem')
             if not item or not data: return {'streams': []}
             items_to_process = data if isinstance(data, list) else [data]
-            all_streams = []
+            
+            instructions = []
             
             for d in items_to_process:
                 if not isinstance(d, dict) or not d.get('chUrl'): continue
@@ -845,38 +846,6 @@ class InatBoxScraper:
                 if not ext_item.get('chType'): ext_item['chType'] = item.get('chType') or item.get('diziType')
                 
                 source_url = ext_item['chUrl']
-                body = ''
-                
-                if '.m3u8' not in source_url and '.mpd' not in source_url:
-                    try:
-                        print(f"🐛 [InatBox Debug] Fetching {source_url} natively in Python...")
-                        req = urllib.request.Request(source_url, headers={'User-Agent': self.CONFIG['userAgent']})
-                        with urllib.request.urlopen(req, timeout=5) as response:
-                            body = response.read().decode('utf-8', errors='ignore')
-                    except Exception as e:
-                        print(f"🐛 [InatBox Debug] Native fetch failed for {source_url}: {e}")
-                
-                res = await self.processFetchResult({
-                    'purpose': 'stream_extract',
-                    'body': body,
-                    'metadata': {'originalItem': ext_item},
-                    'addonManifestUrl': addonManifestUrl
-                })
-                
-                if res and 'streams' in res:
-                    all_streams.extend(res['streams'])
-            
-            if all_streams:
-                return {'streams': all_streams}
-                
-            # Fallback to single instruction if native extraction completely failed and we only have 1 item
-            if len(items_to_process) > 0:
-                d = items_to_process[0]
-                chHeaders = d.get('chHeaders') or item.get('chHeaders') or []
-                ext_item = item.copy()
-                ext_item.update(d)
-                ext_item['chUrl'] = vk_source_fix(d.get('chUrl'))
-                if not ext_item.get('chReg'): ext_item['chReg'] = item.get('chReg')
                 
                 referer = 'https://speedrestapi.com/'
                 ua = self.CONFIG['userAgent']
@@ -884,22 +853,23 @@ class InatBoxScraper:
                     referer = chHeaders[0].get('Referer', referer)
                     ua = chHeaders[0].get('UserAgent', ua)
                     
-                return {
-                    'instructions': [{
-                        'requestId': f"inat-extract-{int(time.time()*1000)}",
-                        'purpose': 'stream_extract',
-                        'url': ext_item['chUrl'],
-                        'method': 'GET',
-                        'headers': {
-                            'Accept': '*/*',
-                            'Referer': referer,
-                            'User-Agent': ua,
-                            'X-Requested-With': 'XMLHttpRequest'
-                        },
-                        'metadata': {'originalItem': ext_item, 'extractorNeeded': True}
-                    }]
-                }
+                instructions.append({
+                    'requestId': f"inat-extract-{int(time.time()*1000)}-{random.randint(1000,9999)}",
+                    'purpose': 'stream_extract',
+                    'url': source_url,
+                    'method': 'GET',
+                    'headers': {
+                        'Accept': '*/*',
+                        'Referer': referer,
+                        'User-Agent': ua,
+                        'X-Requested-With': 'XMLHttpRequest'
+                    },
+                    'metadata': {'originalItem': ext_item, 'extractorNeeded': True},
+                    'addonManifestUrl': addonManifestUrl
+                })
             
+            if instructions:
+                return {'instructions': instructions}
             return {'streams': []}
 
         if purpose in ['meta', 'meta_series_seasons', 'meta_series_episodes']:

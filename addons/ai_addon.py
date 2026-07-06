@@ -1,7 +1,7 @@
 import base64
 import json
 import urllib.parse
-import urllib.request
+import urllib.parse
 import random
 import time
 import os
@@ -59,30 +59,6 @@ class GeminiAIFinderScraper:
             print(f"Error reading api key: {e}")
         return os.environ.get('GEMINI_API_KEY', '')
 
-    async def ask_gemini(self, prompt):
-        api_key = self.get_api_key()
-        if not api_key:
-            return "ERROR: Lütfen Admin panelinden eklentinin Headers kısmına '{\"Gemini-API-Key\": \"YOUR_KEY\"}' ekleyin veya config dosyasına geminiApiKey ekleyin."
-            
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
-        
-        payload = {
-            "contents": [{
-                "parts": [{"text": prompt}]
-            }],
-            "generationConfig": {
-                "temperature": 0.2
-            }
-        }
-        
-        try:
-            req = urllib.request.Request(url, data=json.dumps(payload).encode('utf-8'), headers={'Content-Type': 'application/json'}, method='POST')
-            response = await asyncio.to_thread(urllib.request.urlopen, req)
-            data = json.loads(response.read().decode('utf-8'))
-            return data['candidates'][0]['content']['parts'][0]['text'].strip()
-        except Exception as e:
-            print(f"Gemini API Error: {e}")
-            return f"ERROR: {str(e)}"
 
     def get_enhanced_headers(self):
         return {
@@ -167,8 +143,37 @@ class GeminiAIFinderScraper:
             
             prompt = f"Kullanıcı '{searchQuery}' kelimesini arattı. Google arama sonuçlarından aşağıdaki linkleri bulduk:\n\n{links_text}\n\nLütfen bu linkler arasından filmi/diziyi bedava izleyebileceği en uygun yasadışı veya yasal korsan/film izleme sitesinin (hdfilmcehennemi, dizipal vb.) linkini seç. Sadece URL'yi yaz, başka hiçbir kelime ekleme."
             
-            ai_response = await self.ask_gemini(prompt)
+            ai_response = ""
             
+            api_key = self.get_api_key()
+            if not api_key:
+                return {'metas': [{'id': 'gemini:error', 'type': 'movie', 'name': 'API Key Eksik', 'description': 'Lütfen admin panelden API key ekleyin.'}]}
+                
+            payload = {
+                "contents": [{"parts": [{"text": prompt}]}],
+                "generationConfig": {"temperature": 0.2}
+            }
+            gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
+            
+            return {
+                'instructions': [{
+                    'requestId': f"gemini-google-{int(time.time()*1000)}-{random.randint(100,999)}",
+                    'purpose': 'google-search-ai',
+                    'url': gemini_url,
+                    'method': 'POST',
+                    'headers': {'Content-Type': 'application/json'},
+                    'body': json.dumps(payload),
+                    'metadata': {'searchQuery': searchQuery, 'hiddenweb': True}
+                }]
+            }
+
+        if purpose == 'google-search-ai':
+            try:
+                data = json.loads(body)
+                ai_response = data['candidates'][0]['content']['parts'][0]['text'].strip()
+            except Exception as e:
+                return {'metas': [{'id': 'gemini:error', 'type': 'movie', 'name': 'AI Hata', 'description': str(e)}]}
+
             if ai_response.startswith('http'):
                 chosen_url = ai_response.strip()
                 meta_id = 'gemini:' + base64_encode_safe(chosen_url)
@@ -234,12 +239,41 @@ GÖREVİN:
 
 Lütfen SADECE yukarıdaki formatlardan birini kullanarak cevap ver. Başka hiçbir şey yazma.
 """
-            ai_response = await self.ask_gemini(prompt)
-            ai_response = ai_response.strip()
+            api_key = self.get_api_key()
+            if not api_key:
+                return {'streams': []}
+                
+            payload = {
+                "contents": [{"parts": [{"text": prompt}]}],
+                "generationConfig": {"temperature": 0.2}
+            }
+            gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
+            
+            return {
+                'instructions': [{
+                    'requestId': f"gemini-step-{int(time.time()*1000)}-{random.randint(100,999)}",
+                    'purpose': 'ai-step-ai',
+                    'url': gemini_url,
+                    'method': 'POST',
+                    'headers': {'Content-Type': 'application/json'},
+                    'body': json.dumps(payload),
+                    'metadata': {'step': step, 'originalUrl': url, 'hiddenweb': True}
+                }]
+            }
+
+        if purpose == 'ai-step-ai':
+            try:
+                data = json.loads(body)
+                ai_response = data['candidates'][0]['content']['parts'][0]['text'].strip()
+            except Exception as e:
+                print(f"Gemini Step AI Error: {e}")
+                return {'streams': []}
+                
+            step = metadata.get('step', 1)
+            url = metadata.get('originalUrl', '')
             
             if ai_response.startswith('VIDEO:'):
                 video_url = ai_response.replace('VIDEO:', '').strip()
-                # Eğer relative url ise:
                 if video_url.startswith('//'): video_url = 'https:' + video_url
                 elif video_url.startswith('/'): video_url = f"https://{urllib.parse.urlparse(url).netloc}{video_url}"
                 

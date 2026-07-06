@@ -370,6 +370,8 @@ async def process_fetch_result(request: Request):
         return {"success": True, "data": result}
         
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         print(f"❌ [Fetch Result] Processing error: {str(e)}")
         return {"success": False, "error": str(e)}
 

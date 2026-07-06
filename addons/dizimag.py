@@ -1,64 +1,26 @@
 import base64
 import json
 import urllib.parse
-import random
 import time
-import hashlib
+import re
 from bs4 import BeautifulSoup
-from Crypto.Cipher import AES
 
 def base64_encode_safe(s):
     return base64.b64encode(s.encode('utf-8')).decode('utf-8').replace('=', '')
 
 def fix_url(url):
     if not url: return None
-    BASE_URL = 'https://dizimag.onl'
+    BASE_URL = 'https://dizimag.eu'
     if url.startswith('//'): return 'https:' + url
     if not url.startswith('http'): return BASE_URL + ('' if url.startswith('/') else '/') + url
     return url
 
-def evp_bytes_to_key(password, salt, key_len, iv_len):
-    password_buffer = password.encode('utf-8')
-    salt_buffer = bytes.fromhex(salt)
-    
-    derived_key = b''
-    block = None
-    target_len = key_len + iv_len
-    
-    while len(derived_key) < target_len:
-        hash_obj = hashlib.md5()
-        if block:
-            hash_obj.update(block)
-        hash_obj.update(password_buffer)
-        hash_obj.update(salt_buffer)
-        block = hash_obj.digest()
-        derived_key += block
-        
-    key = derived_key[:key_len]
-    iv = derived_key[key_len:key_len+iv_len]
-    return key, iv
-
-def decrypt_be_player(password, cipher_text, salt_hex):
-    try:
-        key, iv = evp_bytes_to_key(password, salt_hex, 32, 16)
-        cipher = AES.new(key, AES.MODE_CBC, iv)
-        encrypted_data = base64.b64decode(cipher_text)
-        decrypted_padded = cipher.decrypt(encrypted_data)
-        
-        # unpad
-        pad_len = decrypted_padded[-1]
-        decrypted = decrypted_padded[:-pad_len]
-        return decrypted.decode('utf-8')
-    except Exception as e:
-        print(f'Decryption error: {e}')
-        return None
-
 class DiziMagScraper:
     def __init__(self):
-        self.BASE_URL = 'https://dizimag.onl'
+        self.BASE_URL = 'https://dizimag.eu'
         self.manifest = {
             'id': 'community.dizimag',
-            'version': '1.0.0',
+            'version': '2.0.0',
             'name': 'DiziMag',
             'description': 'Türkçe dizi ve film izleme platformu - DiziMag için Stremio eklentisi',
             'resources': ['catalog', 'meta', 'stream'],
@@ -67,19 +29,17 @@ class DiziMagScraper:
                 {'type': 'series', 'id': 'dizimag_new_episodes', 'name': 'Yeni Eklenenler', 'extra': [{'name': 'skip', 'isRequired': False}]},
                 {'type': 'series', 'id': 'dizimag_search', 'name': 'Arama', 'extra': [{'name': 'search', 'isRequired': True}]},
                 {'type': 'movie', 'id': 'dizimag_search', 'name': 'Arama', 'extra': [{'name': 'search', 'isRequired': True}]},
-                {'type': 'series', 'id': 'dizimag_dizi_aile', 'name': 'Aile'},
-                {'type': 'series', 'id': 'dizimag_dizi_aksiyon', 'name': 'Aksiyon-Macera'},
-                {'type': 'series', 'id': 'dizimag_dizi_animasyon', 'name': 'Animasyon'},
-                {'type': 'series', 'id': 'dizimag_dizi_belgesel', 'name': 'Belgesel'},
-                {'type': 'series', 'id': 'dizimag_dizi_bilimkurgu', 'name': 'Bilim Kurgu'},
-                {'type': 'series', 'id': 'dizimag_dizi_dram', 'name': 'Dram'},
-                {'type': 'series', 'id': 'dizimag_dizi_gizem', 'name': 'Gizem'},
-                {'type': 'series', 'id': 'dizimag_dizi_komedi', 'name': 'Komedi'},
-                {'type': 'series', 'id': 'dizimag_dizi_savas', 'name': 'Savaş Politik'},
-                {'type': 'series', 'id': 'dizimag_dizi_suc', 'name': 'Suç'},
-                {'type': 'movie', 'id': 'dizimag_film_aile', 'name': 'Aile Film'},
-                {'type': 'movie', 'id': 'dizimag_film_animasyon', 'name': 'Animasyon Film'},
-                {'type': 'movie', 'id': 'dizimag_film_bilimkurgu', 'name': 'Bilim-Kurgu Film'}
+                {'type': 'series', 'id': 'dizimag_dizi_aile', 'name': 'Aile', 'extra': [{'name': 'skip', 'isRequired': False}]},
+                {'type': 'series', 'id': 'dizimag_dizi_aksiyon', 'name': 'Aksiyon-Macera', 'extra': [{'name': 'skip', 'isRequired': False}]},
+                {'type': 'series', 'id': 'dizimag_dizi_animasyon', 'name': 'Animasyon', 'extra': [{'name': 'skip', 'isRequired': False}]},
+                {'type': 'series', 'id': 'dizimag_dizi_belgesel', 'name': 'Belgesel', 'extra': [{'name': 'skip', 'isRequired': False}]},
+                {'type': 'series', 'id': 'dizimag_dizi_bilimkurgu', 'name': 'Bilim Kurgu', 'extra': [{'name': 'skip', 'isRequired': False}]},
+                {'type': 'series', 'id': 'dizimag_dizi_dram', 'name': 'Dram', 'extra': [{'name': 'skip', 'isRequired': False}]},
+                {'type': 'series', 'id': 'dizimag_dizi_gizem', 'name': 'Gizem', 'extra': [{'name': 'skip', 'isRequired': False}]},
+                {'type': 'series', 'id': 'dizimag_dizi_komedi', 'name': 'Komedi', 'extra': [{'name': 'skip', 'isRequired': False}]},
+                {'type': 'series', 'id': 'dizimag_dizi_savas', 'name': 'Savaş Politik', 'extra': [{'name': 'skip', 'isRequired': False}]},
+                {'type': 'series', 'id': 'dizimag_dizi_suc', 'name': 'Suç', 'extra': [{'name': 'skip', 'isRequired': False}]},
+                {'type': 'movie', 'id': 'dizimag_film_yeni', 'name': 'Yeni Filmler', 'extra': [{'name': 'skip', 'isRequired': False}]}
             ],
             'idPrefixes': ['dizimag']
         }
@@ -98,67 +58,74 @@ class DiziMagScraper:
         catalogId = args.get('id')
         extra = args.get('extra', {})
         skip = int(extra.get('skip', 0))
-        page = (skip // 24) + 1
+        page = (skip // 20) + 1  # 20 items per page usually
         searchQuery = extra.get('search')
         
         if catalogId == 'dizimag_search' and searchQuery:
-            headers = self.get_headers()
-            headers.update({
-                'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-                'X-Requested-With': 'XMLHttpRequest',
-                'Accept': 'application/json, text/javascript, */*; q=0.01'
-            })
+            # /?s=query
+            url = f"{self.BASE_URL}/page/{page}?s={urllib.parse.quote(searchQuery)}" if page > 1 else f"{self.BASE_URL}/?s={urllib.parse.quote(searchQuery)}"
             return {
                 'instructions': [{
                     'requestId': f"dizimag-search-{int(time.time()*1000)}",
-                    'purpose': 'catalog-search',
-                    'url': f"{self.BASE_URL}/search",
-                    'method': 'POST',
-                    'headers': headers,
-                    'body': f"query={urllib.parse.quote(searchQuery)}",
-                    'metadata': {}
+                    'purpose': 'catalog',
+                    'url': url,
+                    'method': 'GET',
+                    'headers': self.get_headers(),
+                    'metadata': {'hiddenweb': True}
                 }]
             }
 
         if catalogId == 'dizimag_new_episodes':
+            url = f"{self.BASE_URL}/dizi/page/{page}" if page > 1 else f"{self.BASE_URL}/dizi"
             return {
                 'instructions': [{
                     'requestId': f"dizimag-new-{int(time.time()*1000)}",
-                    'purpose': 'catalog-new',
-                    'url': f"{self.BASE_URL}/kesfet/eyJ0eXBlIjoic2VyaWVzIn0=/{page}",
+                    'purpose': 'catalog',
+                    'url': url,
                     'method': 'GET',
                     'headers': self.get_headers(),
-                    'metadata': {}
+                    'metadata': {'hiddenweb': True}
+                }]
+            }
+            
+        if catalogId == 'dizimag_film_yeni':
+            url = f"{self.BASE_URL}/film/page/{page}" if page > 1 else f"{self.BASE_URL}/film"
+            return {
+                'instructions': [{
+                    'requestId': f"dizimag-film-{int(time.time()*1000)}",
+                    'purpose': 'catalog',
+                    'url': url,
+                    'method': 'GET',
+                    'headers': self.get_headers(),
+                    'metadata': {'hiddenweb': True}
                 }]
             }
 
         genre_map = {
-            'dizimag_dizi_aile': '/dizi/tur/aile',
-            'dizimag_dizi_aksiyon': '/dizi/tur/aksiyon-macera',
-            'dizimag_dizi_animasyon': '/dizi/tur/animasyon',
-            'dizimag_dizi_belgesel': '/dizi/tur/belgesel',
-            'dizimag_dizi_bilimkurgu': '/dizi/tur/bilim-kurgu-fantazi',
-            'dizimag_dizi_dram': '/dizi/tur/dram',
-            'dizimag_dizi_gizem': '/dizi/tur/gizem',
-            'dizimag_dizi_komedi': '/dizi/tur/komedi',
-            'dizimag_dizi_savas': '/dizi/tur/savas-politik',
-            'dizimag_dizi_suc': '/dizi/tur/suc',
-            'dizimag_film_aile': '/film/tur/aile',
-            'dizimag_film_animasyon': '/film/tur/animasyon',
-            'dizimag_film_bilimkurgu': '/film/tur/bilim-kurgu'
+            'dizimag_dizi_aile': 'aile',
+            'dizimag_dizi_aksiyon': 'aksiyon-macera',
+            'dizimag_dizi_animasyon': 'animasyon',
+            'dizimag_dizi_belgesel': 'belgesel',
+            'dizimag_dizi_bilimkurgu': 'bilim-kurgu-fantazi',
+            'dizimag_dizi_dram': 'dram',
+            'dizimag_dizi_gizem': 'gizem',
+            'dizimag_dizi_komedi': 'comedy',
+            'dizimag_dizi_savas': 'savas',
+            'dizimag_dizi_suc': 'suc',
         }
 
         if catalogId in genre_map:
-            base_genre_url = f"{self.BASE_URL}{genre_map[catalogId]}"
-            url = f"{base_genre_url}/{page}" if page > 1 else base_genre_url
+            genre_slug = genre_map[catalogId]
+            base_genre_url = f"{self.BASE_URL}/kategori/{genre_slug}"
+            url = f"{base_genre_url}/page/{page}" if page > 1 else base_genre_url
             return {
                 'instructions': [{
                     'requestId': f"dizimag-genre-{int(time.time()*1000)}",
-                    'purpose': 'catalog-genre',
+                    'purpose': 'catalog',
                     'url': url,
                     'method': 'GET',
                     'headers': self.get_headers(),
-                    'metadata': {}
+                    'metadata': {'hiddenweb': True}
                 }]
             }
 
@@ -166,10 +133,8 @@ class DiziMagScraper:
 
     async def handleMeta(self, args):
         urlBase64 = args.get('id', '').replace('dizimag:', '')
-        # Base64 pad
         urlBase64 += '=' * (-len(urlBase64) % 4)
         url = base64.b64decode(urlBase64).decode('utf-8')
-        url = url.replace('dizimag.nl', 'dizimag.onl')
         
         return {
             'instructions': [{
@@ -178,7 +143,7 @@ class DiziMagScraper:
                 'url': url,
                 'method': 'GET',
                 'headers': self.get_headers(),
-                'metadata': {}
+                'metadata': {'originalUrl': url, 'hiddenweb': True}
             }]
         }
 
@@ -186,147 +151,123 @@ class DiziMagScraper:
         urlBase64 = args.get('id', '').replace('dizimag:', '')
         urlBase64 += '=' * (-len(urlBase64) % 4)
         url = base64.b64decode(urlBase64).decode('utf-8')
-        url = url.replace('dizimag.nl', 'dizimag.onl')
         
+        # In this new logic, the id is already the episode/movie URL
         return {
             'instructions': [{
-                'requestId': f"dizimag-init-{int(time.time()*1000)}",
-                'purpose': 'init-session',
-                'url': self.BASE_URL,
+                'requestId': f"dizimag-stream-init-{int(time.time()*1000)}",
+                'purpose': 'stream-page',
+                'url': url,
                 'method': 'GET',
                 'headers': self.get_headers(),
-                'metadata': {'targetUrl': url}
+                'metadata': {'targetUrl': url, 'hiddenweb': True}
             }]
         }
 
     async def processFetchResult(self, fetchResult):
         purpose = fetchResult.get('purpose')
         body = fetchResult.get('body', '')
-        url = fetchResult.get('url', '').replace('dizimag.nl', 'dizimag.onl')
+        url = fetchResult.get('url', '')
         metadata = fetchResult.get('metadata', {})
 
-        if purpose in ['catalog-new', 'catalog-genre']:
+        if purpose == 'catalog':
             soup = BeautifulSoup(body, 'html.parser')
             metas = []
             
-            if purpose == 'catalog-new':
-                for elem in soup.select('div.filter-result-box'):
-                    h2 = elem.select_one('h2.truncate')
-                    title = h2.text.strip() if h2 else None
-                    a_tag = elem.select_one('div.filter-result-box-image a')
-                    href = a_tag.get('href') if a_tag else None
-                    img = elem.select_one('div.filter-result-box-image img')
-                    posterUrl = img.get('data-src') if img else None
+            for elem in soup.select('div.poster') + soup.select('article.item') + soup.select('div.result-item article'):
+                if 'class' in elem.attrs and 'item' in elem.attrs['class'] and elem.name == 'article':
+                    poster_div = elem.select_one('.posterf') or elem.select_one('.poster')
+                    a_tag = elem.select_one('a')
+                    img = elem.select_one('img')
+                elif elem.parent and 'result-item' in elem.parent.get('class', []):
+                    poster_div = elem.select_one('.image')
+                    a_tag = elem.select_one('a')
+                    img = elem.select_one('img')
+                else:
+                    poster_div = elem
+                    a_tag = elem.parent if elem.parent.name == 'a' else (elem.parent.parent if elem.parent.parent.name == 'a' else elem.find('a'))
+                    img = elem.find('img')
+                
+                if not a_tag or not img:
+                    continue
                     
-                    if title and href:
-                        fullUrl = fix_url(href)
-                        m_type = 'series' if '/dizi/' in href else 'movie'
-                        meta_id = 'dizimag:' + base64_encode_safe(fullUrl)
-                        metas.append({'id': meta_id, 'type': m_type, 'name': title, 'poster': fix_url(posterUrl)})
-            else:
-                for elem in soup.select('div.poster-long'):
-                    h2 = elem.select_one('h2.truncate')
-                    title = h2.text.strip() if h2 else None
-                    a_tag = elem.select_one('div.poster-long-image a')
-                    href = a_tag.get('href') if a_tag else None
-                    img = elem.select_one('div.poster-long-image img')
-                    posterUrl = img.get('data-src') if img else None
-                    
-                    if title and href:
-                        fullUrl = fix_url(href)
-                        m_type = 'series' if '/dizi/' in href else 'movie'
-                        meta_id = 'dizimag:' + base64_encode_safe(fullUrl)
-                        metas.append({'id': meta_id, 'type': m_type, 'name': title, 'poster': fix_url(posterUrl)})
+                href = a_tag.get('href')
+                title = img.get('alt')
+                if not title and a_tag.get('title'): title = a_tag.get('title')
+                if not title:
+                    title_el = elem.parent.parent.select_one('h3 a') or elem.select_one('.nf-logo')
+                    if title_el: title = title_el.text.strip()
+                
+                posterUrl = img.get('data-src') or img.get('src')
+                
+                if title and href and 'wp-content/themes' not in posterUrl:
+                    fullUrl = fix_url(href)
+                    m_type = 'series' if '/dizi/' in href else 'movie'
+                    meta_id = 'dizimag:' + base64_encode_safe(fullUrl)
+                    metas.append({'id': meta_id, 'type': m_type, 'name': title, 'poster': fix_url(posterUrl)})
             
-            return {'metas': metas}
-
-        if purpose == 'catalog-search':
-            try:
-                json_data = json.loads(body)
-                if not json_data.get('success') or not json_data.get('theme'): return {'metas': []}
-                
-                soup = BeautifulSoup(json_data['theme'], 'html.parser')
-                metas = []
-                
-                for elem in soup.select('.result-series'):
-                    parent_a = elem.parent
-                    if parent_a and parent_a.name == 'a':
-                        href = parent_a.get('href')
-                        title_el = elem.select_one('span.truncate')
-                        title = title_el.text.strip() if title_el else None
-                        img = elem.find('img')
-                        posterUrl = img.get('data-src') if img else None
-                        
-                        if title and href:
-                            fullUrl = fix_url(href)
-                            meta_id = 'dizimag:' + base64_encode_safe(fullUrl)
-                            metas.append({'id': meta_id, 'type': 'series', 'name': title, 'poster': fix_url(posterUrl)})
-                            
-                for elem in soup.select('.result-movies'):
-                    title_link = elem.select_one('.result-movies-text a')
-                    href = title_link.get('href') if title_link else None
-                    title = title_link.text.strip() if title_link else None
-                    img = elem.select_one('.result-movies-image img')
-                    posterUrl = img.get('data-src') if img else None
+            # Deduplicate by id
+            seen = set()
+            unique_metas = []
+            for m in metas:
+                if m['id'] not in seen:
+                    seen.add(m['id'])
+                    unique_metas.append(m)
                     
-                    if title and href:
-                        fullUrl = fix_url(href)
-                        meta_id = 'dizimag:' + base64_encode_safe(fullUrl)
-                        metas.append({'id': meta_id, 'type': 'movie', 'name': title, 'poster': fix_url(posterUrl)})
-                
-                return {'metas': metas}
-            except Exception as e:
-                print(f'Search parse error: {e}')
-                return {'metas': []}
+            return {'metas': unique_metas}
 
         if purpose == 'meta':
             soup = BeautifulSoup(body, 'html.parser')
             
-            title_el = soup.select_one('div.page-title h1 a')
-            title = title_el.text.strip() if title_el else ''
-            org_title_el = soup.select_one('div.page-title p')
-            orgTitle = org_title_el.text.strip() if org_title_el else ''
-            fullTitle = f"{title} - {orgTitle}" if orgTitle else title
+            title_el = soup.select_one('h1') or soup.select_one('.sbox h1')
+            fullTitle = title_el.text.strip() if title_el else ''
             
-            img_el = soup.select_one('div.series-profile-image img')
-            poster = img_el.get('src') if img_el else None
+            poster_img = soup.select_one('.sheader .poster img')
+            poster = poster_img.get('data-src') or poster_img.get('src') if poster_img else None
             
-            h1_span = soup.select_one('h1 span')
-            year = None
-            if h1_span:
-                try: year = h1_span.text.split('(')[1].split(')')[0]
-                except: pass
-                
-            rating_el = soup.select_one('span.color-imdb')
-            rating = rating_el.text.strip() if rating_el else None
+            year_match = re.search(r'(\d{4})', fullTitle)
+            year = year_match.group(1) if year_match else None
             
-            desc_el = soup.select_one('div.series-profile-summary p')
+            desc_el = soup.select_one('div.wp-content p')
             description = desc_el.text.strip() if desc_el else ''
             
-            tags = [el.text.strip() for el in soup.select('div.series-profile-type a')]
-            actors = [el.text.strip() for el in soup.select('div.series-profile-cast li h5.truncate')]
+            tags = [el.text.strip() for el in soup.select('.sgeneros a')]
+            actors = [el.text.strip() for el in soup.select('.person .name a')]
             
             videos = []
-            if '/dizi/' in url:
-                for seasonIndex, seasonElem in enumerate(soup.select('div.series-profile-episodes-area')):
-                    seasonNo = seasonIndex + 1
-                    for epIndex, epElem in enumerate(seasonElem.find_all('li')):
-                        ep_a = epElem.select_one('h6.truncate a')
-                        epName = ep_a.text.strip() if ep_a else None
-                        first_a = epElem.find('a')
-                        epHref = first_a.get('href') if first_a else None
-                        
-                        if epName and epHref:
-                            episodeNo = epIndex + 1
-                            videoId = 'dizimag:' + base64_encode_safe(fix_url(epHref))
-                            videos.append({
-                                'id': videoId,
-                                'title': epName,
-                                'season': seasonNo,
-                                'episode': episodeNo
-                            })
-                            
             m_type = 'series' if '/dizi/' in url else 'movie'
+            
+            if m_type == 'series':
+                for epElem in soup.select('ul.episodios li'):
+                    ep_a = epElem.find('a')
+                    epName = epElem.select_one('.episodiotitle').contents[0].strip() if epElem.select_one('.episodiotitle') else None
+                    epHref = ep_a.get('href') if ep_a else None
+                    num_text = epElem.select_one('.numerando')
+                    
+                    seasonNo = 1
+                    episodeNo = 1
+                    if num_text:
+                        s_match = re.search(r'S-(\d+)\s*-\s*E-(\d+)', num_text.text)
+                        if s_match:
+                            seasonNo = int(s_match.group(1))
+                            episodeNo = int(s_match.group(2))
+                    
+                    if epName and epHref:
+                        videoId = 'dizimag:' + base64_encode_safe(fix_url(epHref))
+                        videos.append({
+                            'id': videoId,
+                            'title': epName,
+                            'season': seasonNo,
+                            'episode': episodeNo
+                        })
+            else:
+                # Movie, the stream url is the movie url
+                videos.append({
+                    'id': 'dizimag:' + base64_encode_safe(url),
+                    'title': fullTitle,
+                    'season': 1,
+                    'episode': 1
+                })
             
             meta = {
                 'id': 'dizimag:' + base64_encode_safe(url),
@@ -336,145 +277,140 @@ class DiziMagScraper:
                 'background': fix_url(poster),
                 'description': description,
                 'releaseInfo': year,
-                'imdbRating': rating,
                 'genres': tags if tags else None,
                 'cast': actors if actors else None,
                 'videos': videos if videos else None
             }
             return {'meta': meta}
 
-        if purpose == 'init-session':
-            return {
-                'instructions': [{
-                    'requestId': f"dizimag-stream-page-{int(time.time()*1000)}",
-                    'purpose': 'stream-page',
-                    'url': metadata.get('targetUrl'),
-                    'method': 'GET',
-                    'headers': self.get_headers(),
-                    'metadata': {}
-                }]
-            }
-
         if purpose == 'stream-page':
-            print(f"🎬 [DiziMag] Processing stream-page for {url}")
             soup = BeautifulSoup(body, 'html.parser')
-            iframe_urls = []
+            sources = soup.select('.kaynakname')
+            print(f"🎬 [DiziMag] Found {len(sources)} sources from DOM")
             
-            for tab_li in soup.select('ul.alternative-group li'):
-                tab_id = tab_li.get('data-number')
-                if not tab_id: continue
-                
-                lang_a = tab_li.find('a')
-                lang = lang_a.text.strip() if lang_a else 'Auto'
-                
-                tab_div = soup.select_one(f'div#{tab_id}')
-                if tab_div:
-                    for btn in tab_div.select('button[data-frame]'):
-                        frame_url = btn.get('data-frame')
-                        title = btn.get('title', 'DiziMag')
-                        if frame_url:
-                            iframe_urls.append({
-                                'url': fix_url(frame_url),
-                                'lang': lang,
-                                'source': title
-                            })
-            
-            if not iframe_urls:
-                iframeSrc_el = soup.select_one('div#tv-spoox2 iframe')
-                iframeSrc = iframeSrc_el.get('src') if iframeSrc_el else None
-                if iframeSrc:
-                    iframe_urls.append({
-                        'url': fix_url(iframeSrc),
-                        'lang': 'Auto',
-                        'source': 'DiziMag'
+            instructions = []
+            for src in sources:
+                onclick = src.get('onclick', '')
+                match = re.search(r"Change_Source\('([^']+)',\s*'([^']+)',\s*'([^']+)',\s*'([^']+)',\s*'([^']+)'\)", onclick)
+                if match:
+                    postid = match.group(1)
+                    source_name = match.group(2)
+                    lang_code = match.group(4)
+                    partno = match.group(5)
+                    lang = "Türkçe Altyazı" if "sub" in lang_code else "Türkçe Dublaj"
+                    
+                    randomId = str(int(time.time() * 1000000))[-8:]
+                    instructions.append({
+                        'requestId': f"dizimag-part-{int(time.time()*1000)}-{randomId}",
+                        'purpose': 'part-getir',
+                        'url': 'https://dizimag.eu/partgetirply.php',
+                        'method': 'POST',
+                        'headers': {
+                            'Content-Type': 'application/x-www-form-urlencoded',
+                            'Referer': url,
+                            'Accept': '*/*'
+                        },
+                        'body': f"data={postid}%2C{partno}",
+                        'metadata': {
+                            'hiddenweb': True,
+                            'sourceName': source_name,
+                            'lang': lang,
+                            'originalUrl': url
+                        }
                     })
             
-            print(f"🎬 [DiziMag] Found {len(iframe_urls)} iframes: {iframe_urls}")
-            if not iframe_urls: return {'streams': []}
+            return {'instructions': instructions}
+
+        if purpose == 'part-getir':
+            m = re.search(r'(https?://[^\s<>"\'\\]+)', body)
+            iframe_url = m.group(1).replace('\\/', '/') if m else body.strip()
             
+            if iframe_url and iframe_url.startswith('http'):
+                if iframe_url.endswith('.m3u8') or iframe_url.endswith('.mp4'):
+                    return {'streams': [{
+                        'name': f"DiziMag\n{metadata.get('sourceName')}",
+                        'title': f"{metadata.get('sourceName')} ({metadata.get('lang')})\nAuto",
+                        'url': iframe_url,
+                        'type': 'm3u8' if iframe_url.endswith('.m3u8') else 'mp4',
+                        'behaviorHints': {'notWebReady': False}
+                    }]}
+                else:
+                    randomId = str(int(time.time() * 1000000))[-8:]
+                    return {'instructions': [{
+                        'requestId': f"dizimag-extract-{int(time.time()*1000)}-{randomId}",
+                        'purpose': 'video-extractor',
+                        'url': iframe_url,
+                        'method': 'GET',
+                        'headers': {
+                            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                            'Referer': self.BASE_URL + '/'
+                        },
+                        'metadata': {
+                            'hiddenweb': True,
+                            'sourceName': metadata.get('sourceName'),
+                            'lang': metadata.get('lang'),
+                            'originalUrl': metadata.get('originalUrl'),
+                            'iframeUrl': iframe_url
+                        }
+                    }]}
+            return {'streams': []}
+
+        if purpose == 'video-extractor':
             try:
-                from curl_cffi.requests import AsyncSession
-                import re
-                streams = []
+                m3uMatch = re.search(r'file:\s*["\']([^"\']+\.m3u8[^"\']*)["\']', body)
+                if not m3uMatch: m3uMatch = re.search(r'"file"\s*:\s*"([^"]+\.m3u8[^"]*)"', body)
+                if not m3uMatch: m3uMatch = re.search(r'source:\s*["\']([^"\']+\.m3u8[^"\']*)["\']', body)
+                if not m3uMatch: m3uMatch = re.search(r'sources:\s*\[\s*["\']([^"\']+\.m3u8[^"\']*)["\']', body)
+                if not m3uMatch: m3uMatch = re.search(r'(https?://[^\s"\'<>()]+\.m3u8[^\s"\'<>()]*)', body)
                 
-                async with AsyncSession(impersonate='chrome110') as s:
-                    for item in iframe_urls:
-                        try:
-                            print(f"🎬 [DiziMag] Fetching iframe: {item['url']}")
-                            r = await s.get(item['url'], headers={'Referer': url, 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'})
-                            print(f"🎬 [DiziMag] Iframe fetch status: {r.status_code}")
-                            if r.status_code == 200:
-                                iframe_body = r.text
-                                bePlayerScript = None
-                                iframe_soup = BeautifulSoup(iframe_body, 'html.parser')
-                                for script in iframe_soup.find_all('script'):
-                                    html = script.string or ''
-                                    if 'bePlayer' in html:
-                                        bePlayerScript = html
-                                        break
-                                        
-                                if bePlayerScript:
-                                    print(f"🎬 [DiziMag] Found bePlayer script")
-                                    match = re.search(r"bePlayer\('(.*?)',\s*'(.*?)'\)", bePlayerScript)
-                                    if match:
-                                        key = match.group(1)
-                                        jsonCipherStr = match.group(2)
-                                        cipherData = json.loads(jsonCipherStr.replace('\\/', '/'))
-                                        decrypted = decrypt_be_player(key, cipherData.get('ct'), cipherData.get('s'))
-                                        
-                                        if decrypted:
-                                            print(f"🎬 [DiziMag] Decryption successful for {item['url']}")
-                                            jsonData = json.loads(decrypted)
-                                            subtitles = []
-                                            
-                                            if 'strSubtitles' in jsonData and isinstance(jsonData['strSubtitles'], list):
-                                                for sub in jsonData['strSubtitles']:
-                                                    label = sub.get('label') or ''
-                                                    isTurkish = any(k in label.lower() for k in ['tur', 'tr', 'türkçe', 'turkce'])
-                                                    sub_lang = 'Turkish' if isTurkish else (label if label else 'Unknown')
-                                                    
-                                                    file_url = sub.get('file')
-                                                    if not file_url: continue
-                                                        
-                                                    if file_url.startswith('/'):
-                                                        file_url = urllib.parse.urljoin(item['url'], file_url)
-                                                        
-                                                    subtitles.append({
-                                                        'id': sub_lang.lower().replace(' ', '_'),
-                                                        'url': file_url,
-                                                        'lang': sub_lang
-                                                    })
-                                                    
-                                            if jsonData.get('video_location'):
-                                                iframe_origin = f"{urllib.parse.urlparse(item['url']).scheme}://{urllib.parse.urlparse(item['url']).netloc}"
-                                                print(f"🎬 [DiziMag] Extracted stream: {jsonData['video_location']}")
-                                                streams.append({
-                                                    'name': f"DiziMag\n{item['source']}",
-                                                    'title': f"{item['source']} ({item['lang']})\nAuto",
-                                                    'url': jsonData['video_location'],
-                                                    'type': 'm3u8',
-                                                    'subtitles': subtitles if subtitles else None,
-                                                    'behaviorHints': {
-                                                        'notWebReady': False,
-                                                        'proxyHeaders': {
-                                                            'request': {
-                                                                'Referer': iframe_origin + "/",
-                                                                'Origin': iframe_origin,
-                                                                'User-Agent': self.get_headers()['User-Agent'],
-                                                                'Cookie': "; ".join([f"{k}={v}" for k, v in s.cookies.get_dict().items()])
-                                                            }
-                                                        }
-                                                    }
-                                                })
-                        except Exception as e:
-                            print(f"❌ Iframe fetch/parse error: {e}")
+                mp4Match = None
+                if not m3uMatch:
+                    mp4Match = re.search(r'file:\s*["\']([^"\']+\.mp4[^"\']*)["\']', body)
+                    if not mp4Match: mp4Match = re.search(r'"file"\s*:\s*"([^"]+\.mp4[^"]*)"', body)
+                    if not mp4Match: mp4Match = re.search(r'(https?://[^\s"\'<>()]+\.mp4[^\s"\'<>()]*)', body)
+
+                source_name = metadata.get('sourceName', 'Extractor')
+                lang = metadata.get('lang', 'Bilinmiyor')
                 
-                print(f"🎬 [DiziMag] Returning {len(streams)} streams")
-                return {'streams': streams}
+                iframeUrl = metadata.get('iframeUrl') or 'https://dizimag.eu/'
+                parsed_url = urllib.parse.urlparse(iframeUrl)
+                origin = f"{parsed_url.scheme}://{parsed_url.netloc}"
+                
+                proxyHeaders = {
+                    'request': {
+                        'Referer': iframeUrl,
+                        'Origin': origin,
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                    }
+                }
+                
+                if m3uMatch:
+                    return {'streams': [{
+                        'name': f"DiziMag\n{source_name}",
+                        'title': f"{source_name} ({lang})\nAuto",
+                        'url': m3uMatch.group(1),
+                        'type': 'm3u8',
+                        'behaviorHints': {
+                            'notWebReady': False,
+                            'proxyHeaders': proxyHeaders
+                        }
+                    }]}
+                elif mp4Match:
+                    return {'streams': [{
+                        'name': f"DiziMag\n{source_name}",
+                        'title': f"{source_name} ({lang})\nAuto",
+                        'url': mp4Match.group(1),
+                        'type': 'mp4',
+                        'behaviorHints': {
+                            'notWebReady': False,
+                            'proxyHeaders': proxyHeaders
+                        }
+                    }]}
+                    
+                return {'streams': []}
             except Exception as e:
-                import traceback
-                print(f"❌ Stream process error: {e}")
-                traceback.print_exc()
+                print(f"❌ Extractor error: {e}")
                 return {'streams': []}
 
         return {'ok': True}

@@ -71,13 +71,17 @@ class YouTubeScraper:
 
     async def handleStream(self, args):
         video_id = args.get('id', '').replace('youtube:', '')
-        
+        if not video_id: return {'streams': []}
+
+        randomId = ''.join(random.choices('abcdefghijklmnopqrstuvwxyz0123456789', k=8))
         return {
-            'streams': [{
-                'ytId': video_id,
-                'name': 'YouTube',
-                'title': 'YouTube Video',
-                'behaviorHints': {'notWebReady': False}
+            'instructions': [{
+                'requestId': f"yt-stream-{int(time.time()*1000)}-{randomId}",
+                'purpose': 'stream',
+                'url': f"https://www.youtube.com/watch?v={video_id}",
+                'method': 'GET',
+                'headers': {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'},
+                'metadata': {'videoId': video_id}
             }]
         }
 
@@ -159,5 +163,78 @@ class YouTubeScraper:
                 'description': desc
             }
             return {'meta': meta}
+
+        elif purpose == 'stream':
+            video_id = metadata.get('videoId')
+            html = fetchResult.get('body', '')
+            
+            # 1) Önce HTML içerisindeki ytInitialPlayerResponse datasını arayalım (Render IP ban'ı atlamak için)
+            import re
+            import urllib.parse
+            
+            try:
+                # ytInitialPlayerResponse içinden url bulma
+                player_res_match = re.search(r'ytInitialPlayerResponse\s*=\s*({.+?});</script>', html)
+                if player_res_match:
+                    player_data = json.loads(player_res_match.group(1))
+                    streaming_data = player_data.get('streamingData', {})
+                    formats = streaming_data.get('formats', []) + streaming_data.get('adaptiveFormats', [])
+                    
+                    # 720p veya mp4 bulmaya çalışalım
+                    best_url = None
+                    for f in formats:
+                        if 'url' in f:
+                            # ses ve görüntü olanı tercih et
+                            if 'audio' in f.get('mimeType', '') or 'video' in f.get('mimeType', ''):
+                                best_url = f['url']
+                                if 'mp4' in f.get('mimeType', '') and '720p' in f.get('qualityLabel', ''):
+                                    break # En iyi seçenek
+                    
+                    if best_url:
+                        return {
+                            'streams': [{
+                                'url': best_url,
+                                'name': 'YouTube',
+                                'title': '720p / MP4',
+                                'behaviorHints': {'notWebReady': False}
+                            }]
+                        }
+            except Exception as e:
+                print(f"HTML ayrıştırma hatası: {e}")
+            
+            # 2) Eğer HTML üzerinden URL bulamazsak, alternatif olarak sunucuda yt-dlp kullanmayı deneriz.
+            # Render üzerinde IP ban sebebiyle hata verebilir, bu yüzden yukarıdaki HTML parse her zaman önceliklidir.
+            try:
+                import yt_dlp
+                ydl_opts = {
+                    'format': 'best',
+                    'quiet': True,
+                    'no_warnings': True,
+                    'extract_flat': False
+                }
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
+                    stream_url = info.get('url')
+                    if stream_url:
+                        return {
+                            'streams': [{
+                                'url': stream_url,
+                                'name': 'YouTube (yt-dlp)',
+                                'title': 'Auto Quality',
+                                'behaviorHints': {'notWebReady': False}
+                            }]
+                        }
+            except Exception as e:
+                print(f"yt-dlp stream hatası: {e}")
+                
+            # Tüm denemelere rağmen URL bulunamazsa, fallback olarak ytId döndürüyoruz
+            return {
+                'streams': [{
+                    'ytId': video_id,
+                    'name': 'YouTube',
+                    'title': 'YouTube Video (Fallback)',
+                    'behaviorHints': {'notWebReady': False}
+                }]
+            }
 
         return {'ok': True}

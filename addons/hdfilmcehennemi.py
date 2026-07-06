@@ -21,59 +21,86 @@ def base64_decode_safe(s):
 def base64_encode_safe(s):
     return base64.b64encode(s.encode('utf-8')).decode('utf-8').replace('=', '')
 
-def rot13(s):
-    """ROT13 dönüşümü - sitenin dc fonksiyonunda kullanılıyor"""
+def rot_n(s, n):
     result = ''
     for c in s:
         if 'a' <= c <= 'z':
-            result += chr(((ord(c) - ord('a') + 13) % 26) + ord('a'))
+            result += chr(((ord(c) - ord('a') + n) % 26) + ord('a'))
         elif 'A' <= c <= 'Z':
-            result += chr(((ord(c) - ord('A') + 13) % 26) + ord('A'))
+            result += chr(((ord(c) - ord('A') + n) % 26) + ord('A'))
         else:
             result += c
     return result
 
 def dc_hello(base64_input, magic_number=399756995, js_body=""):
-    """Site algoritması: reverse → (ROT13 veya atob) → base64 decode → unmix"""
+    """Site algoritması: Dynamic JS parser for rplayer & mobi"""
     try:
         results_to_try = []
         
+        # 1) Fully dynamic parsing based on js_body operations
         if js_body:
-            # Dynamic parsing
             res = base64_input
-            if "reverse()" in js_body:
-                res = res[::-1]
-            if "rot13" in js_body.lower():
-                res = rot13(res)
-            atob_count = js_body.count("atob(")
-            for _ in range(atob_count):
-                res = base64_decode_safe(res)
-            if res:
-                results_to_try.append(res)
+            ops_block_match = re.search(r'result\s*=\s*value;(.*?)let\s+unmix', js_body, re.DOTALL)
+            if ops_block_match:
+                ops_block = ops_block_match.group(1)
+                operations = re.findall(r'result\s*=\s*(result\.replace.*?}\)|result\.split.*?join\([^)]*\)|atob\([^)]*\))', ops_block, re.DOTALL)
+                for op in operations:
+                    if not op.strip(): continue
+                    if 'reverse()' in op:
+                        res = res[::-1]
+                    elif 'atob' in op:
+                        res = base64_decode_safe(res)
+                    elif 'replace' in op and 'String.fromCharCode' in op:
+                        rot_match = re.search(r'o-base\+?(\d+)', op)
+                        if rot_match:
+                            res = rot_n(res, int(rot_match.group(1)))
                 
-        # Also add fallbacks
-        # Fallback 1: Reverse -> ROT13 -> Base64 (Eski yöntem)
-        res1 = base64_decode_safe(rot13(base64_input[::-1]))
-        if res1: results_to_try.append(res1)
-        
-        # Fallback 2: Reverse -> Base64 -> Base64 (Yeni yöntem)
-        res2 = base64_decode_safe(base64_decode_safe(base64_input[::-1]))
-        if res2: results_to_try.append(res2)
+                dyn_magic = magic_number
+                dyn_offset = 5
+                unmix_pattern = re.search(r'charCode\s*-\s*\(?(\d+)\s*%\s*\(i\s*\+\s*(\d+)\)', js_body)
+                if unmix_pattern:
+                    dyn_magic = int(unmix_pattern.group(1))
+                    dyn_offset = int(unmix_pattern.group(2))
+                
+                results_to_try.append((res, dyn_magic, dyn_offset))
 
-        for decoded in results_to_try:
+            # Old dynamic fallback
+            res_old = base64_input
+            if "reverse()" in js_body:
+                res_old = res_old[::-1]
+            if "rot13" in js_body.lower():
+                res_old = rot_n(res_old, 13)
+            for _ in range(js_body.count("atob(")):
+                res_old = base64_decode_safe(res_old)
+            if res_old:
+                results_to_try.append((res_old, magic_number, 5))
+                
+        # 2) Static Fallbacks
+        res1 = base64_decode_safe(rot_n(base64_input[::-1], 13))
+        if res1: results_to_try.append((res1, magic_number, 5))
+        
+        res2 = base64_decode_safe(base64_decode_safe(base64_input[::-1]))
+        if res2: results_to_try.append((res2, magic_number, 5))
+
+        for decoded, mgc, off in results_to_try:
             unmix = ''
             for i in range(len(decoded)):
                 char_code = ord(decoded[i])
-                char_code = (char_code - (magic_number % (i + 5)) + 256) % 256
+                char_code = ((char_code - (mgc % (i + off))) % 256 + 256) % 256
                 unmix += chr(char_code)
             
             unmix = unmix.replace('\n', '').replace('\r', '').strip()
             if 'http' in unmix or '.m3u8' in unmix:
                 return unmix
                 
+        print(f"⚠️  [dc_hello] None of the results worked. tried {len(results_to_try)} methods.")
+        if results_to_try:
+            print(f"⚠️  [dc_hello] First result unmix start: {unmix[:50]}...")
         return None
     except Exception as e:
         print(f"⚠️  dcHello error: {e}")
+        import traceback
+        traceback.print_exc()
         return None
 
 def get_and_unpack(packed_js):
