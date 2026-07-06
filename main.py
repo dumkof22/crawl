@@ -70,14 +70,10 @@ except ImportError:
     inatbox_addon = DummyAddon("InatBox")
 
 try:
-    from addons.selcuksports import SelcukSportsScraper
-    selcuk_addon = SelcukSportsScraper()
+    from addons.selcuk import SelcukScraper
+    selcuk_addon = SelcukScraper()
 except ImportError:
-    try:
-        from addons.selcuk import SelcukScraper
-        selcuk_addon = SelcukScraper()
-    except ImportError:
-        selcuk_addon = DummyAddon("SelcukSports")
+    selcuk_addon = DummyAddon("SelcukSports")
 
 try:
     from addons.sporcafe import SporCafeScraper
