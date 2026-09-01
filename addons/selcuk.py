@@ -7,7 +7,7 @@ import random
 import urllib.parse
 from bs4 import BeautifulSoup
 
-BASE_URL = 'https://www.sporcafe-8938c262c9.xyz'
+BASE_URL = 'https://www.sporcafe-0c2608ad69.xyz'
 DYNAMIC_PLAYER_DOMAIN = ''
 
 def get_channel_filter(catalog_id):

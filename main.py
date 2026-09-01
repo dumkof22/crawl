@@ -88,6 +88,12 @@ except ImportError:
     hdfilmcehennemi_addon = DummyAddon("HDFilmCehennemi")
 
 try:
+    from addons.fullhdfilmizlesene import FullHDFilmIzleseneScraper
+    fullhdfilmizlesene_addon = FullHDFilmIzleseneScraper()
+except ImportError:
+    fullhdfilmizlesene_addon = DummyAddon("FullHDFilmIzlesene")
+
+try:
     from addons.webspor import WebsporScraper
     webspor_addon = WebsporScraper()
 except ImportError:
@@ -130,9 +136,15 @@ try:
 except ImportError:
     youtube_addon = DummyAddon("YouTube")
 
+try:
+    from addons.belgeselx import BelgeselXScraper
+    belgeselx_addon = BelgeselXScraper()
+except ImportError:
+    belgeselx_addon = DummyAddon("BelgeselX")
+
 addon_modules = {
     'cizgivedizi': cizgivedizi_addon,
-    'fullhdfilmizlesene': DummyAddon("FullHDFilmIzlesene"),
+    'fullhdfilmizlesene': fullhdfilmizlesene_addon,
     'hdfilmcehennemi': hdfilmcehennemi_addon,
     'inatbox': inatbox_addon,
     'selcuksports': selcuk_addon,
@@ -144,6 +156,7 @@ addon_modules = {
     'dizibox': dizibox_addon,
     'ai.gemini.finder': ai_addon,
     'youtube': youtube_addon,
+    'belgeselx': belgeselx_addon,
     # ... Diğer eklentilerin buraya eklenecek
 }
 
@@ -312,12 +325,14 @@ async def handle_stream(addon_id: str, request: Request):
         raise HTTPException(status_code=404, detail={"error": "Addon or method not found"})
     
     body = await request.json()
-    print(f"\n🎬 [{addon_id}] STREAM instruction request")
-    
+    print(f"\n🎬 [{addon_id}] STREAM instruction request | body={json.dumps(body, ensure_ascii=False)}")
+
     try:
         result = await addon.handleStream(body)
+        print(f"🎬 [{addon_id}] STREAM response | {json.dumps(result, ensure_ascii=False)[:1500]}")
         return result
     except Exception as e:
+        import traceback; traceback.print_exc()
         print(f"❌ [{addon_id}] Stream error: {str(e)}")
         raise HTTPException(status_code=500, detail={"error": str(e)})
 

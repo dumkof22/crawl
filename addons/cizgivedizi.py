@@ -1,4 +1,3 @@
-import asyncio
 import base64
 import json
 import re
@@ -6,20 +5,41 @@ import time
 import random
 import urllib.parse
 from bs4 import BeautifulSoup
-from Crypto.Cipher import AES
 
 BASE_URL = 'https://cizgivedizi.com'
 
-CATALOG_TAG_MAP = {
-    'cizgivedizi_diziler': 'diz',
-    'cizgivedizi_cizgi_diziler': 'çd',
-    'cizgivedizi_animeler': 'ani',
-    'cizgivedizi_yansimalar': 'yans',
-    'cizgivedizi_preschool': 'pro',
-    'cizgivedizi_belgesel': 'bel',
-    'cizgivedizi_komedi': 'kom',
-    'cizgivedizi_macera': 'mac'
+# Katalog id -> filtre tanımı.
+#   types  : kabul edilen data-type değerleri (kart üzerindeki)
+#   genre  : (opsiyonel) data-genresraw içinde aranan tür adı
+#   metatype: Stremio meta tipi
+CATALOG_DEFS = {
+    'cizgivedizi_cizgi_diziler': {'types': ['cizgi'], 'metatype': 'series'},
+    'cizgivedizi_animeler':      {'types': ['anime'], 'metatype': 'series'},
+    'cizgivedizi_diziler':       {'types': ['dizi'], 'metatype': 'series'},
+    'cizgivedizi_filmler':       {'types': ['film'], 'metatype': 'movie'},
+    'cizgivedizi_komedi':        {'types': ['cizgi', 'anime', 'dizi'], 'genre': 'Komedi', 'metatype': 'series'},
+    'cizgivedizi_macera':        {'types': ['cizgi', 'anime', 'dizi'], 'genre': 'Macera', 'metatype': 'series'},
+    'cizgivedizi_fantastik':     {'types': ['cizgi', 'anime', 'dizi'], 'genre': 'Fantastik', 'metatype': 'series'},
+    'cizgivedizi_aksiyon':       {'types': ['cizgi', 'anime', 'dizi'], 'genre': 'Aksiyon', 'metatype': 'series'},
+    'cizgivedizi_bilim_kurgu':   {'types': ['cizgi', 'anime', 'dizi'], 'genre': 'Bilim Kurgu', 'metatype': 'series'},
+    'cizgivedizi_korku':         {'types': ['cizgi', 'anime', 'dizi'], 'genre': 'Korku', 'metatype': 'series'},
 }
+
+PAGE_SIZE = 100
+
+# Bölüm/film sayfasındaki tür rozetleri (/diziyeni/turresim/<kod>.png) için kod -> ad.
+GENRE_CODE_MAP = {
+    'kom': 'Komedi', 'mac': 'Macera', 'fant': 'Fantastik', 'aks': 'Aksiyon',
+    'bilkur': 'Bilim Kurgu', 'dra': 'Dram', 'müz': 'Müzik/Müzikal', 'muz': 'Müzik/Müzikal',
+    'eği': 'Eğitici/Öğretici', 'egi': 'Eğitici/Öğretici', 'gh': 'Günlük Hayattan',
+    'giz': 'Gizem', 'kor': 'Korku', 'doğ': 'Doğa ve Hayvanlar', 'dog': 'Doğa ve Hayvanlar',
+    'spo': 'Spor', 'rom': 'Romantik', 'suç': 'Suç/Polisiye', 'suc': 'Suç/Polisiye',
+    'abs': 'Absürt', 'dedek': 'Dedektif', 'romkom': 'Romantik Komedi', 'yem': 'Yemek',
+    'tar': 'Tarihi', 'özel': 'Özel', 'ozel': 'Özel', 'lgbt': 'LGBT', 'tıp': 'Tıp', 'tip': 'Tıp',
+    'sav': 'Savaş', 'sih': 'Sihir', 'mini': 'Mini Seriler', 'kuş': 'Kuşaklar', 'kus': 'Kuşaklar',
+}
+_NON_GENRE_CODES = {'film', 'cd', 'çd', 'ani', 'diz', 'dizi', 'anime', 'cizgi', 'yans'}
+
 
 def get_enhanced_headers(referer=BASE_URL):
     return {
@@ -29,613 +49,635 @@ def get_enhanced_headers(referer=BASE_URL):
         'Referer': referer
     }
 
-def fix_image_format(url):
-    if not url: return None
-    # Cloudinary proxy is returning 401 Unauthorized, returning original url.
-    return url
 
 def normalize_string(text):
+    text = (text or '').lower()
     text = text.replace('ı', 'i').replace('ğ', 'g').replace('ü', 'u').replace('ş', 's').replace('ö', 'o').replace('ç', 'c')
-    text = text.replace('İ', 'I').replace('Ğ', 'G').replace('Ü', 'U').replace('Ş', 'S').replace('Ö', 'O').replace('Ç', 'C')
-    text = text.replace('-', ' ').replace('_', ' ').replace('.', ' ')
-    return text
+    text = text.replace('İ', 'i').replace('Ğ', 'g').replace('Ü', 'u').replace('Ş', 's').replace('Ö', 'o').replace('Ç', 'c')
+    text = re.sub(r'[-_.]+', ' ', text)
+    return re.sub(r'\s+', ' ', text).strip()
 
-def url_create(metin):
-    harfler = {
-        "İ": "I", "ı": "i", "Ş": "S", "ş": "s", "Ğ": "G", "ğ": "g", 
-        "Ü": "U", "ü": "u", "Ö": "O", "ö": "o", "Ç": "C", "ç": "c", 
-        "/": "", "?": ""
-    }
-    metin = metin.lower()
-    for k, v in harfler.items():
-        metin = metin.replace(k, v)
-    metin = metin.replace(" ", "_")
-    return metin
+
+def b64_encode(url):
+    return 'cizgivedizi:' + base64.b64encode(url.encode('utf-8')).decode('utf-8').replace('=', '')
+
+
+def b64_decode(video_id):
+    b64 = video_id.replace('cizgivedizi:', '')
+    b64 += '=' * (-len(b64) % 4)
+    return base64.b64decode(b64).decode('utf-8')
+
+
+def abs_url(u):
+    if not u:
+        return u
+    if u.startswith('//'):
+        return 'https:' + u
+    if u.startswith('http'):
+        return u
+    return BASE_URL + (u if u.startswith('/') else '/' + u)
+
+
+def _encode_url(u):
+    """URL içindeki ASCII olmayan karakterleri (ör. resim adlarındaki İ) yüzde-kodla."""
+    if not u:
+        return u
+    try:
+        parts = urllib.parse.urlsplit(u)
+        path = urllib.parse.quote(parts.path, safe="/%:@&=+$,;~")
+        return urllib.parse.urlunsplit((parts.scheme, parts.netloc, path, parts.query, parts.fragment))
+    except Exception:
+        return u
+
+
+def rand_id(n=8):
+    return ''.join(random.choices('0123456789abcdefghijklmnopqrstuvwxyz', k=n))
+
 
 def crypto_aes_handler(data_b64, passphrase_str, encrypt=False):
     try:
+        from Crypto.Cipher import AES
         if encrypt:
-            pass
-        else:
-            data = base64.b64decode(data_b64)
-            passphrase = passphrase_str.encode('utf-8')
-            
-            import hashlib
-            key_iv = b''
-            prev = b''
-            while len(key_iv) < 48:
-                prev = hashlib.md5(prev + passphrase).digest()
-                key_iv += prev
-            
-            key = key_iv[:32]
-            iv = key_iv[32:48]
-            
-            cipher = AES.new(key, AES.MODE_CBC, iv)
-            decrypted = cipher.decrypt(data)
-            
-            pad_len = decrypted[-1]
-            decrypted = decrypted[:-pad_len]
-            return decrypted.decode('utf-8')
+            return None
+        data = base64.b64decode(data_b64)
+        passphrase = passphrase_str.encode('utf-8')
+
+        import hashlib
+        key_iv = b''
+        prev = b''
+        while len(key_iv) < 48:
+            prev = hashlib.md5(prev + passphrase).digest()
+            key_iv += prev
+
+        key = key_iv[:32]
+        iv = key_iv[32:48]
+
+        cipher = AES.new(key, AES.MODE_CBC, iv)
+        decrypted = cipher.decrypt(data)
+        pad_len = decrypted[-1]
+        return decrypted[:-pad_len].decode('utf-8')
     except Exception as e:
         print(f"❌ AES decrypt error: {e}")
         return None
 
 
+def _detect_extractor(embed_url):
+    host = urllib.parse.urlparse(embed_url).netloc.lower()
+    if 'sibnet' in host:
+        return 'sibnet', 'SibNet'
+    if 'cizgiduo' in host:
+        return 'cizgiduo', 'CizgiDuo'
+    if 'cizgipass' in host or 'cizgipas' in host:
+        return 'cizgipass', 'CizgiPass'
+    if 'drive.google' in host:
+        return 'googledrive', 'GDrive'
+    if 'mp4upload' in host:
+        return 'mp4upload', 'Mp4Upload'
+    if 'abyss' in host:
+        return 'generic', 'Abyss'
+    if 'mail.ru' in host:
+        return 'generic', 'MailRu'
+    return 'generic', (host.split(':')[0] or 'CizgiveDizi')
+
+
 class CizgiveDiziScraper:
     def __init__(self):
+        catalogs = [
+            {"type": "series", "id": "cizgivedizi_cizgi_diziler", "name": "Çizgi Diziler", "extra": [{"name": "skip", "isRequired": False}]},
+            {"type": "series", "id": "cizgivedizi_animeler", "name": "Animeler", "extra": [{"name": "skip", "isRequired": False}]},
+            {"type": "series", "id": "cizgivedizi_diziler", "name": "Diziler", "extra": [{"name": "skip", "isRequired": False}]},
+            {"type": "series", "id": "cizgivedizi_komedi", "name": "Komedi", "extra": [{"name": "skip", "isRequired": False}]},
+            {"type": "series", "id": "cizgivedizi_macera", "name": "Macera", "extra": [{"name": "skip", "isRequired": False}]},
+            {"type": "series", "id": "cizgivedizi_fantastik", "name": "Fantastik", "extra": [{"name": "skip", "isRequired": False}]},
+            {"type": "series", "id": "cizgivedizi_aksiyon", "name": "Aksiyon", "extra": [{"name": "skip", "isRequired": False}]},
+            {"type": "series", "id": "cizgivedizi_bilim_kurgu", "name": "Bilim Kurgu", "extra": [{"name": "skip", "isRequired": False}]},
+            {"type": "series", "id": "cizgivedizi_korku", "name": "Korku", "extra": [{"name": "skip", "isRequired": False}]},
+            {"type": "series", "id": "cizgivedizi_search", "name": "Ara", "extra": [{"name": "search", "isRequired": True}, {"name": "skip", "isRequired": False}]},
+            {"type": "movie", "id": "cizgivedizi_filmler", "name": "Filmler", "extra": [{"name": "skip", "isRequired": False}]},
+            {"type": "movie", "id": "cizgivedizi_search", "name": "Ara", "extra": [{"name": "search", "isRequired": True}, {"name": "skip", "isRequired": False}]},
+        ]
         self.manifest = {
             "id": "community.cizgivedizi",
-            "version": "1.0.0",
+            "version": "2.0.0",
             "name": "CizgiveDizi",
-            "description": "Türkçe çizgi film ve dizi platformu - CizgiveDizi için Stremio eklentisi (Instruction Mode)",
-            "logo": "https://cizgivedizi.com/Logo.png",
+            "description": "Türkçe çizgi film, anime, dizi ve film platformu - CizgiveDizi için Stremio eklentisi (Instruction Mode)",
+            "logo": "https://cizgivedizi.com/favicon.ico",
             "resources": ["catalog", "meta", "stream"],
             "types": ["series", "movie"],
-            "catalogs": [
-                {"type": "series", "id": "cizgivedizi_diziler", "name": "Diziler", "extra": [{"name": "skip", "isRequired": False}]},
-                {"type": "series", "id": "cizgivedizi_cizgi_diziler", "name": "Çizgi Diziler", "extra": [{"name": "skip", "isRequired": False}]},
-                {"type": "series", "id": "cizgivedizi_animeler", "name": "Animeler", "extra": [{"name": "skip", "isRequired": False}]},
-                {"type": "series", "id": "cizgivedizi_yansimalar", "name": "Yansımalar", "extra": [{"name": "skip", "isRequired": False}]},
-                {"type": "series", "id": "cizgivedizi_preschool", "name": "Okul Öncesi", "extra": [{"name": "skip", "isRequired": False}]},
-                {"type": "series", "id": "cizgivedizi_belgesel", "name": "Belgesel", "extra": [{"name": "skip", "isRequired": False}]},
-                {"type": "series", "id": "cizgivedizi_komedi", "name": "Komedi", "extra": [{"name": "skip", "isRequired": False}]},
-                {"type": "series", "id": "cizgivedizi_macera", "name": "Macera", "extra": [{"name": "skip", "isRequired": False}]},
-                {"type": "series", "id": "cizgivedizi_search", "name": "Ara", "extra": [{"name": "search", "isRequired": True}, {"name": "skip", "isRequired": False}]}
-            ],
+            "catalogs": catalogs,
             "idPrefixes": ["cizgivedizi"]
         }
 
     def getManifest(self):
         return self.manifest
 
+    # ------------------------------------------------------------------
+    # INSTRUCTION ÜRETİCİLER
+    # ------------------------------------------------------------------
     async def handleCatalog(self, args):
-        print(f"\n🎯 [CizgiveDizi Catalog] Generating instructions...")
         catalog_id = args.get('id')
-        extra = args.get('extra', {})
+        req_type = args.get('type')
+        extra = args.get('extra', {}) or {}
         search_query = extra.get('search')
-        
-        random_id = ''.join(random.choices('0123456789abcdefghijklmnopqrstuvwxyz', k=8))
-        
-        if catalog_id == 'cizgivedizi_search' and search_query:
-            request_id = f"cizgivedizi-search-{int(time.time()*1000)}-{random_id}"
-            headers = get_enhanced_headers(BASE_URL)
-            headers['Accept-Charset'] = 'utf-8'
-            return {
-                "instructions": [{
-                    "requestId": request_id,
-                    "purpose": "catalog-data",
-                    "url": f"{BASE_URL}/dizi/isim.txt",
-                    "method": "GET",
-                    "headers": headers,
-                    "metadata": {
-                        "catalogId": catalog_id,
-                        "searchQuery": search_query,
-                        "additionalUrls": {
-                            "poster": f"{BASE_URL}/dizi/poster.txt",
-                            "etiket": f"{BASE_URL}/dizi/etiket.txt"
-                        }
-                    }
-                }]
-            }
-            
-        tag_code = CATALOG_TAG_MAP.get(catalog_id)
-        if not tag_code:
-            return {"instructions": []}
-            
-        request_id = f"cizgivedizi-catalog-{catalog_id}-{int(time.time()*1000)}-{random_id}"
+        try:
+            skip = int(extra.get('skip') or 0)
+        except Exception:
+            skip = 0
+
+        if catalog_id != 'cizgivedizi_search' and catalog_id not in CATALOG_DEFS:
+            return {"metas": []}
+
         headers = get_enhanced_headers(BASE_URL)
         headers['Accept-Charset'] = 'utf-8'
         return {
             "instructions": [{
-                "requestId": request_id,
+                "requestId": f"cizgivedizi-catalog-{int(time.time()*1000)}-{rand_id()}",
                 "purpose": "catalog-data",
-                "url": f"{BASE_URL}/dizi/isim.txt",
+                "url": f"{BASE_URL}/",
                 "method": "GET",
                 "headers": headers,
                 "metadata": {
+                    "hiddenweb": False,
                     "catalogId": catalog_id,
-                    "tagCode": tag_code,
-                    "additionalUrls": {
-                        "poster": f"{BASE_URL}/dizi/poster.txt",
-                        "etiket": f"{BASE_URL}/dizi/etiket.txt"
-                    }
+                    "reqType": req_type,
+                    "searchQuery": search_query,
+                    "skip": skip
                 }
             }]
         }
 
     async def handleMeta(self, args):
-        video_id = args.get('id', '')
-        b64 = video_id.replace('cizgivedizi:', '')
-        b64 += '=' * (-len(b64) % 4)
-        url = base64.b64decode(b64).decode('utf-8')
-        
+        url = b64_decode(args.get('id', ''))
+        is_movie = '/film/' in url
         encoded_url = urllib.parse.quote(url, safe=";/?:@&=+$,%")
-        random_id = ''.join(random.choices('0123456789abcdefghijklmnopqrstuvwxyz', k=8))
-        request_id = f"cizgivedizi-meta-{int(time.time()*1000)}-{random_id}"
-        
         return {
             "instructions": [{
-                "requestId": request_id,
+                "requestId": f"cizgivedizi-meta-{int(time.time()*1000)}-{rand_id()}",
                 "purpose": "meta",
                 "url": encoded_url,
                 "method": "GET",
-                "headers": get_enhanced_headers(BASE_URL)
+                "headers": get_enhanced_headers(BASE_URL),
+                "metadata": {"hiddenweb": False, "originalUrl": url, "isMovie": is_movie}
             }]
         }
 
     async def handleStream(self, args):
-        video_id = args.get('id', '')
-        b64 = video_id.replace('cizgivedizi:', '')
-        b64 += '=' * (-len(b64) % 4)
-        url = base64.b64decode(b64).decode('utf-8')
-        
+        url = b64_decode(args.get('id', ''))
         encoded_url = urllib.parse.quote(url, safe=";/?:@&=+$,%")
-        random_id = ''.join(random.choices('0123456789abcdefghijklmnopqrstuvwxyz', k=8))
-        request_id = f"cizgivedizi-stream-{int(time.time()*1000)}-{random_id}"
-        
         return {
             "instructions": [{
-                "requestId": request_id,
-                "purpose": "stream",
+                "requestId": f"cizgivedizi-stream-{int(time.time()*1000)}-{rand_id()}",
+                "purpose": "stream-page",
                 "url": encoded_url,
                 "method": "GET",
-                "headers": get_enhanced_headers(encoded_url)
+                "headers": get_enhanced_headers(BASE_URL),
+                "metadata": {"hiddenweb": False, "originalUrl": url}
             }]
         }
-        
+
+    # ------------------------------------------------------------------
+    # FLUTTER'DAN DÖNEN SONUÇLARI İŞLE
+    # ------------------------------------------------------------------
     async def processFetchResult(self, fetchResult):
         purpose = fetchResult.get('purpose')
         body = fetchResult.get('body')
         url = fetchResult.get('url')
         metadata = fetchResult.get('metadata') or {}
         status = fetchResult.get('status')
-        
+
         if status and status != 200:
             if purpose == 'catalog-data':
                 return {"metas": []}
-            elif purpose == 'meta':
+            if purpose == 'meta':
                 return {"meta": None}
-            elif 'stream' in purpose or 'extractor' in purpose:
+            if purpose in ('stream-page', 'extractor') or 'stream' in (purpose or '') or 'extract' in (purpose or ''):
                 return {"streams": []}
             return {"ok": False, "error": f"HTTP {status}"}
-            
+
+        if isinstance(body, bytes):
+            body = body.decode('utf-8', errors='ignore')
+        body = body or ''
+
         if purpose == 'catalog-data':
-            if isinstance(body, bytes):
-                body_str = body.decode('utf-8', errors='ignore')
+            return self._parse_catalog(body, metadata)
+        if purpose == 'meta':
+            return self._parse_meta(body, metadata)
+        if purpose == 'stream-page':
+            return self._parse_stream_page(body, metadata)
+        if purpose == 'extractor':
+            return self._parse_extractor(body, url, metadata)
+        if purpose == 'googledrive-api':
+            return self._gdrive_api(body, metadata)
+        if purpose == 'googledrive-embed':
+            return self._gdrive_embed(body, metadata)
+        if purpose == 'googledrive-video':
+            return self._gdrive_video(body, metadata)
+
+        return {"ok": True}
+
+    # ------------------------------------------------------------------
+    # KATALOG
+    # ------------------------------------------------------------------
+    def _parse_catalog(self, body, metadata):
+        catalog_id = metadata.get('catalogId')
+        req_type = metadata.get('reqType')
+        search_query = metadata.get('searchQuery')
+        skip = metadata.get('skip') or 0
+
+        soup = BeautifulSoup(body, 'html.parser')
+
+        if catalog_id == 'cizgivedizi_search':
+            if req_type == 'movie':
+                allowed_types = ['film']
+                genre = None
             else:
-                body_str = str(body)
-            
-            lines = [line.strip() for line in body_str.split('\n') if line.strip().startswith('|')]
-            isim_data = {}
-            for line in lines:
-                match = re.match(r'^\|([^=]+)=(.+)$', line)
-                if match:
-                    isim_data[match.group(1).strip()] = match.group(2).strip()
-                    
-            additional_urls = metadata.get('additionalUrls', {})
-            import httpx
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                try:
-                    poster_res, etiket_res = await asyncio.gather(
-                        client.get(additional_urls.get('poster', '')),
-                        client.get(additional_urls.get('etiket', ''))
-                    )
-                    poster_str = poster_res.text
-                    etiket_str = etiket_res.text
-                except Exception as e:
-                    print(f"Error fetching catalog data: {e}")
-                    return {"metas": []}
-                    
-            poster_data = {}
-            for line in poster_str.split('\n'):
-                if line.strip().startswith('|'):
-                    match = re.match(r'^\|([^=]+)=(.+)$', line.strip())
-                    if match:
-                        poster_data[match.group(1).strip()] = match.group(2).strip()
-                        
-            etiket_data = {}
-            for line in etiket_str.split('\n'):
-                if line.strip().startswith('|'):
-                    match = re.match(r'^\|([^=]+)=(.+)$', line.strip())
-                    if match:
-                        etiket_data[match.group(1).strip()] = match.group(2).strip()
-                        
-            tag_code = metadata.get('tagCode')
-            search_query = metadata.get('searchQuery')
-            metas = []
-            
-            for key, isim in isim_data.items():
-                poster = poster_data.get(key)
-                etiketler = etiket_data.get(key, '').split(';')
-                
-                if tag_code and tag_code not in etiketler:
+                allowed_types = ['cizgi', 'anime', 'dizi']
+                genre = None
+        else:
+            cdef = CATALOG_DEFS.get(catalog_id)
+            if not cdef:
+                return {"metas": []}
+            allowed_types = cdef['types']
+            genre = cdef.get('genre')
+
+        n_query = normalize_string(search_query) if search_query else None
+        metas = []
+        seen = set()
+
+        for a in soup.select('a.item'):
+            href = a.get('href') or ''
+            if not (href.startswith('/dizi/') or href.startswith('/film/')):
+                continue
+            dtype = (a.get('data-type') or '').strip()
+            if dtype not in allowed_types:
+                continue
+
+            name = (a.get('aria-label') or a.get('data-name') or '').strip()
+            if not name:
+                continue
+
+            genres = [g.strip() for g in (a.get('data-genresraw') or '').split('|') if g.strip()]
+            if genre and genre not in genres:
+                continue
+
+            if n_query:
+                haystack = normalize_string(
+                    name + ' ' + (a.get('data-name') or '') + ' ' +
+                    (a.get('data-hay') or '') + ' ' + (a.get('data-hay-en') or '')
+                )
+                if n_query not in haystack:
                     continue
-                    
-                if search_query:
-                    n_query = normalize_string(search_query.lower())
-                    n_title = normalize_string(isim.lower())
-                    if n_query not in n_title:
-                        continue
-                        
-                dizi_url_part = url_create(isim)
-                dizi_url = f"{BASE_URL}/dizi/{key}/{dizi_url_part}"
-                dizi_id = 'cizgivedizi:' + base64.b64encode(dizi_url.encode('utf-8')).decode('utf-8').replace('=', '')
-                
-                metas.append({
-                    "id": dizi_id,
-                    "type": "series",
-                    "name": isim,
-                    "poster": fix_image_format(poster)
-                })
-            return {"metas": metas}
-            
-        elif purpose == 'meta':
-            soup = BeautifulSoup(body, 'html.parser')
-            
-            title_el = soup.select_one('.infoLine h4') or soup.select_one('h4') or soup.select_one('h1')
-            title = title_el.text.strip() if title_el else None
-            if not title or title == 'Hoş Geldiniz':
-                return {"meta": None}
-                
-            poster_el = soup.select_one('picture img') or soup.select_one('img')
-            raw_poster = poster_el.get('src') if poster_el else None
-            if raw_poster and not raw_poster.startswith('http'):
-                raw_poster = raw_poster if raw_poster.startswith('/') else f"/{raw_poster}"
-                raw_poster = f"{BASE_URL}{raw_poster}"
-            poster = fix_image_format(raw_poster)
-            
-            plot_el = soup.select_one('p.lead')
-            if plot_el:
-                plot = plot_el.text.strip()
+
+            full_url = abs_url(href)
+            if full_url in seen:
+                continue
+            seen.add(full_url)
+
+            img = a.select_one('img.poster-img') or a.select_one('img')
+            poster = _encode_url(abs_url(img.get('src'))) if img and img.get('src') else None
+
+            metas.append({
+                "id": b64_encode(full_url),
+                "type": "movie" if dtype == 'film' else "series",
+                "name": name,
+                "poster": poster,
+                "genres": genres or None
+            })
+
+        return {"metas": metas[skip:skip + PAGE_SIZE]}
+
+    # ------------------------------------------------------------------
+    # META
+    # ------------------------------------------------------------------
+    def _clean_title(self, raw):
+        if not raw:
+            return None
+        t = raw.strip()
+        for suf in [' Türkçe İzle', ' İzle | Çizgi ve Dizi', ' İzle', ' | Çizgi ve Dizi', ' - Çizgi ve Dizi']:
+            if t.endswith(suf):
+                t = t[:-len(suf)].strip()
+        return t or None
+
+    def _parse_meta(self, body, metadata):
+        original_url = metadata.get('originalUrl') or ''
+        is_movie = metadata.get('isMovie')
+        soup = BeautifulSoup(body, 'html.parser')
+
+        title_tag = soup.select_one('title')
+        title = self._clean_title(title_tag.text if title_tag else None)
+        if not title:
+            h = soup.select_one('h1') or soup.select_one('h2')
+            title = h.text.strip() if h else None
+        if not title:
+            return {"meta": None}
+
+        description = ""
+        desc_el = soup.select_one('meta[name="description"]')
+        if desc_el and desc_el.get('content'):
+            description = desc_el.get('content').strip()
+        if not description:
+            sc = soup.select_one('.summary-content') or soup.select_one('p.lead')
+            if sc and sc.get_text(strip=True):
+                description = sc.get_text(' ', strip=True)
+
+        poster = None
+        og_img = soup.select_one('meta[property="og:image"]')
+        if og_img and og_img.get('content'):
+            poster = og_img.get('content')
+        if not poster:
+            m = re.search(r"(https://cizgivedizi\.com/resim/[^\"'()\s]*[Pp]oster[^\"'()\s]*)", body)
+            if m:
+                poster = m.group(1)
+        if not poster:
+            bg = soup.select_one('[data-bg-url]')
+            if bg and bg.get('data-bg-url'):
+                poster = bg.get('data-bg-url')
+        if not poster:
+            pi = soup.select_one('img.poster-img')
+            if pi and pi.get('src'):
+                poster = pi.get('src')
+        poster = _encode_url(abs_url(poster)) if poster else None
+
+        genres = []
+        for img in soup.select('img.tag-logo'):
+            code = ''
+            src = img.get('src') or ''
+            mcode = re.search(r'/turresim/([^/.]+)\.', src)
+            if mcode:
+                code = urllib.parse.unquote(mcode.group(1)).strip().lower()
+            label = (img.get('title') or img.get('alt') or '').strip()
+            if code in _NON_GENRE_CODES:
+                continue
+            name = GENRE_CODE_MAP.get(code)
+            if not name:
+                # başlık tam ad gibi görünüyorsa (boşluk/büyük harf) onu kullan
+                if label and (' ' in label or label != label.lower()) and label.lower() not in _NON_GENRE_CODES:
+                    name = label
+            if name and name not in genres:
+                genres.append(name)
+
+        meta = {
+            "id": b64_encode(original_url),
+            "type": "movie" if is_movie else "series",
+            "name": title,
+            "poster": poster,
+            "background": poster,
+            "description": description or "Açıklama mevcut değil",
+            "genres": genres or None
+        }
+
+        if is_movie:
+            return {"meta": meta}
+
+        # Sezon bilgisi: #s1, #s2 ... kutularından href -> sezon eşlemesi
+        season_of = {}
+        for box in soup.select('div.list-box'):
+            box_id = box.get('id') or ''
+            if len(box_id) > 1 and box_id[0] == 's' and box_id[1:].isdigit():
+                snum = int(box_id[1:])
+                for a in box.select('a.row'):
+                    if a.get('href'):
+                        season_of[a.get('href')] = snum
+
+        all_box = soup.select_one('#all')
+        rows = all_box.select('a.row') if all_box else soup.select('a.row')
+
+        videos = []
+        seen = set()
+        for a in rows:
+            href = a.get('href')
+            if not href or href in seen:
+                continue
+            seen.add(href)
+
+            ep_raw = (a.get('data-episode-id') or a.get('data-episode-safe-id') or '').strip()
+            m = re.match(r'(\d+)', ep_raw)
+            episode = int(m.group(1)) if m else (len(videos) + 1)
+            season = season_of.get(href, 1)
+
+            name_el = a.select_one('.name')
+            eng_el = a.select_one('.eng-name')
+            sub_el = a.select_one('.sub')
+            ep_name = name_el.text.strip() if name_el and name_el.text.strip() else f"{episode}. Bölüm"
+            eng_name = eng_el.text.strip() if eng_el else ''
+            if eng_name and eng_name.lower() != ep_name.lower():
+                ep_title = f"{ep_name} ({eng_name})"
             else:
-                plot = ""
-                for p in soup.select('p'):
-                    txt = p.text.strip()
-                    if len(txt) > 50 and '©' not in txt and 'Sitemize' not in txt:
-                        plot = txt
-                        break
-                        
-            tags = []
-            for el in soup.select('[data-bs-title]'):
-                t = el.get('data-bs-title')
-                if t and len(t) > 2 and t not in tags:
-                    tags.append(t)
-                    
-            videos = []
-            for i, a in enumerate(soup.select('a.bolum')):
-                href = a.get('href')
-                if not href: continue
-                
-                sezon_str = a.get('data-sezon')
-                try:
-                    sezon = int(sezon_str) if sezon_str else 1
-                except Exception:
-                    sezon = 1
-                parts = href.split('/')
-                try:
-                    episode = int(parts[-2])
-                except Exception:
-                    episode = i + 1
-                    
-                title_attr = a.get('title') or a.get('data-bs-title')
-                ep_name = parts[-1].replace('_', ' ').capitalize() if len(parts) > 0 else ""
-                ep_title = ep_name if title_attr else f"{episode}. Bölüm"
-                
-                full_url = href if href.startswith('http') else f"{BASE_URL}{href}"
-                vid_id = 'cizgivedizi:' + base64.b64encode(full_url.encode('utf-8')).decode('utf-8').replace('=', '')
-                
-                vid = {
-                    "id": vid_id,
-                    "title": ep_title,
-                    "season": sezon,
-                    "episode": episode
+                ep_title = ep_name
+
+            full_url = abs_url(href)
+            vid = {
+                "id": b64_encode(full_url),
+                "title": ep_title,
+                "season": season,
+                "episode": episode
+            }
+            if sub_el and sub_el.text.strip():
+                vid["overview"] = sub_el.text.strip()
+            videos.append(vid)
+
+        videos.sort(key=lambda v: (v["season"], v["episode"]))
+        meta["videos"] = videos
+        return {"meta": meta}
+
+    # ------------------------------------------------------------------
+    # STREAM
+    # ------------------------------------------------------------------
+    def _extract_embeds(self, body):
+        soup = BeautifulSoup(body, 'html.parser')
+        blob = None
+        container = soup.select_one('#videoDataContainer')
+        if container and container.get('data-embeds'):
+            blob = container.get('data-embeds')
+        if not blob:
+            m = re.search(r"__embeds_b64\s*=\s*'([^']+)'", body)
+            if m:
+                blob = m.group(1)
+        if not blob:
+            m = re.search(r'__embeds_b64\s*=\s*"([^"]+)"', body)
+            if m:
+                blob = m.group(1)
+        if not blob:
+            return []
+        try:
+            decoded = base64.b64decode(blob).decode('utf-8', errors='ignore')
+            data = json.loads(decoded)
+            if isinstance(data, list):
+                return [str(x) for x in data if x]
+        except Exception as e:
+            print(f"❌ embed decode error: {e}")
+        return []
+
+    def _parse_stream_page(self, body, metadata):
+        original_url = metadata.get('originalUrl') or ''
+        embeds = self._extract_embeds(body)
+        if not embeds:
+            return {"streams": []}
+
+        instructions = []
+        for i, raw in enumerate(embeds):
+            embed_url = abs_url(raw)
+            extractor_type, server_name = _detect_extractor(embed_url)
+            encoded = urllib.parse.quote(embed_url, safe=";/?:@&=+$,%")
+            instructions.append({
+                "requestId": f"cizgivedizi-extract-{int(time.time()*1000)}-{rand_id()}-{i}",
+                "purpose": "extractor",
+                "url": encoded,
+                "method": "GET",
+                "headers": get_enhanced_headers(BASE_URL),
+                "metadata": {
+                    "hiddenweb": False,
+                    "originalUrl": original_url,
+                    "extractorType": extractor_type,
+                    "serverName": f"{server_name} {i + 1}" if len(embeds) > 1 else server_name
                 }
-                if title_attr:
-                    vid["overview"] = title_attr
-                videos.append(vid)
-                
+            })
+        return {"instructions": instructions}
+
+    def _parse_extractor(self, body, url, metadata):
+        extractor_type = metadata.get('extractorType', 'generic')
+        server_name = metadata.get('serverName', 'CizgiveDizi')
+        referer = urllib.parse.quote(url or '', safe=";/?:@&=+$,%")
+
+        def make_stream(stream_url, ref=None):
             return {
-                "meta": {
-                    "id": 'cizgivedizi:' + base64.b64encode(url.encode('utf-8')).decode('utf-8').replace('=', ''),
-                    "type": "series",
-                    "name": title,
-                    "poster": poster,
-                    "background": poster,
-                    "description": plot or "Açıklama mevcut değil",
-                    "genres": tags if tags else None,
-                    "videos": videos
+                "name": server_name,
+                "title": server_name,
+                "url": stream_url,
+                "behaviorHints": {
+                    "notWebReady": False,
+                    "bingeGroup": "cizgivedizi-stream",
+                    "proxyHeaders": {
+                        "request": {
+                            "User-Agent": "Mozilla/5.0",
+                            "Referer": ref or referer
+                        }
+                    }
                 }
             }
-            
-        elif purpose == 'stream':
-            soup = BeautifulSoup(body, 'html.parser')
-            play_link = soup.select_one('a[href*="/play"]')
-            play_url = play_link.get('href') if play_link else None
-            
-            if not play_url:
-                iframe = soup.select_one('iframe')
-                if iframe: play_url = iframe.get('src')
-                
-            if not play_url:
-                return {"streams": []}
-                
-            full_play_url = play_url if play_url.startswith('http') else f"{BASE_URL}{play_url}"
-            
-            if any(x in full_play_url for x in ['video.sibnet.ru', 'cizgiduo.online', 'cizgipass', 'drive.google.com']):
-                extractor_type = 'generic'
-                server_name = 'CizgiveDizi'
-                if 'cizgiduo.online' in full_play_url:
-                    extractor_type = 'cizgiduo'
-                    server_name = 'CizgiDuo'
-                elif 'cizgipass' in full_play_url:
-                    extractor_type = 'cizgipass'
-                    server_name = 'CizgiPass'
-                elif 'drive.google.com' in full_play_url:
-                    extractor_type = 'googledrive'
-                    server_name = 'GdrivePlayer'
-                elif 'video.sibnet.ru' in full_play_url:
-                    extractor_type = 'sibnet'
-                    server_name = 'SibNet'
-                    
-                random_id = ''.join(random.choices('0123456789abcdefghijklmnopqrstuvwxyz', k=8))
-                encoded = urllib.parse.quote(full_play_url, safe=";/?:@&=+$,%")
+
+        streams = []
+
+        if extractor_type in ('cizgiduo', 'cizgipass'):
+            m = re.search(r"bePlayer\('([^']+)',\s*'(\{[^}]+\})'\);", body)
+            if m:
+                decrypted = crypto_aes_handler(m.group(2), m.group(1), False)
+                if decrypted:
+                    vm = re.search(r'video_location":"([^"]+)', decrypted)
+                    if vm:
+                        streams.append(make_stream(vm.group(1).replace('\\', '')))
+
+        elif extractor_type == 'sibnet':
+            m = re.search(r'player\.src\(\[\{\s*src:\s*"([^"]+)"', body)
+            if m:
+                src = m.group(1)
+                if not src.startswith('http'):
+                    src = 'https://video.sibnet.ru' + (src if src.startswith('/') else '/' + src)
+                streams.append(make_stream(src, ref='https://video.sibnet.ru/'))
+
+        elif extractor_type == 'googledrive':
+            parts = (url or '').split('/d/')
+            if len(parts) > 1:
+                url_id = parts[1].split('/')[0]
                 return {
                     "instructions": [{
-                        "requestId": f"cizgivedizi-extract-{int(time.time()*1000)}-{random_id}",
-                        "purpose": "extractor",
-                        "url": encoded,
+                        "requestId": f"cizgivedizi-gdrive-api-{int(time.time()*1000)}-{rand_id()}",
+                        "purpose": "googledrive-api",
+                        "url": "https://gdplayer.vip/api/video",
+                        "method": "POST",
+                        "headers": {
+                            "Content-Type": "application/x-www-form-urlencoded",
+                            "User-Agent": "Mozilla/5.0"
+                        },
+                        "body": f"file_id={url_id}&subtitle=",
+                        "metadata": {"hiddenweb": False, "serverName": server_name, "urlId": url_id}
+                    }]
+                }
+
+        else:
+            patterns = [
+                r'file:\s*["\']([^"\']+\.m3u8[^"\']*)["\']',
+                r'"file"\s*:\s*"([^"]+\.m3u8[^"]*)"',
+                r'source:\s*["\']([^"\']+\.m3u8[^"\']*)["\']',
+                r'src:\s*["\']([^"\']+\.m3u8[^"\']*)["\']',
+                r'(https?:\/\/[^\s"\'<>()]+\.m3u8[^\s"\'<>()]*)',
+                r'player\.src\(\[\{\s*src:\s*"([^"]+)"',
+                r'sources:\s*\[\{\s*(?:file|src)\s*:\s*["\']([^"\']+)["\']',
+                r'(https?:\/\/[^\s"\'<>()]+\.mp4[^\s"\'<>()]*)',
+            ]
+            for pat in patterns:
+                m = re.search(pat, body)
+                if m:
+                    streams.append(make_stream(m.group(1)))
+                    break
+
+        return {"streams": streams}
+
+    # ------------------------------------------------------------------
+    # GOOGLE DRIVE (gdplayer.vip) ZİNCİRİ
+    # ------------------------------------------------------------------
+    def _gdrive_api(self, body, metadata):
+        try:
+            data = json.loads(body)
+            if data.get('status') == 'success' and 'embedUrl' in data.get('data', {}):
+                return {
+                    "instructions": [{
+                        "requestId": f"cizgivedizi-gdrive-embed-{int(time.time()*1000)}-{rand_id()}",
+                        "purpose": "googledrive-embed",
+                        "url": data['data']['embedUrl'],
                         "method": "GET",
-                        "headers": get_enhanced_headers(encoded),
+                        "headers": get_enhanced_headers('https://gdplayer.vip/'),
+                        "metadata": {"hiddenweb": False, "serverName": metadata.get('serverName')}
+                    }]
+                }
+        except Exception:
+            pass
+        return {"streams": []}
+
+    def _gdrive_embed(self, body, metadata):
+        soup = BeautifulSoup(body, 'html.parser')
+        body_el = soup.select_one('body[ng-init]')
+        if body_el:
+            m = re.search(r"init\('([^']+)',\s*'([^']+)',\s*'([^']+)',\s*'([^']*)'\)", body_el.get('ng-init'))
+            if m:
+                play_url = m.group(1)
+                key_hex = m.group(2)
+                return {
+                    "instructions": [{
+                        "requestId": f"cizgivedizi-gdrive-video-{int(time.time()*1000)}-{rand_id()}",
+                        "purpose": "googledrive-video",
+                        "url": f"{play_url}/?video_id={key_hex}&action=get_video",
+                        "method": "GET",
+                        "headers": {"User-Agent": "Mozilla/5.0", "Referer": "https://gdplayer.vip/"},
                         "metadata": {
-                            "originalUrl": url,
-                            "extractorType": extractor_type,
-                            "serverName": server_name
+                            "hiddenweb": False,
+                            "serverName": metadata.get('serverName'),
+                            "playUrl": play_url,
+                            "keyHex": key_hex
                         }
                     }]
                 }
-                
-            random_id = ''.join(random.choices('0123456789abcdefghijklmnopqrstuvwxyz', k=8))
-            encoded = urllib.parse.quote(full_play_url, safe=";/?:@&=+$,%")
-            return {
-                "instructions": [{
-                    "requestId": f"cizgivedizi-play-{int(time.time()*1000)}-{random_id}",
-                    "purpose": "play-page",
-                    "url": encoded,
-                    "method": "GET",
-                    "headers": get_enhanced_headers(encoded),
-                    "metadata": {"originalUrl": url}
-                }]
-            }
-            
-        elif purpose == 'play-page':
-            soup = BeautifulSoup(body, 'html.parser')
-            iframes = []
-            for iframe in soup.select('iframe'):
-                src = iframe.get('src')
-                if src:
-                    iframes.append(src if src.startswith('http') else f"{BASE_URL}{src}")
-                    
-            if not iframes: return {"streams": []}
-            
-            instructions = []
-            for i, iframe_url in enumerate(iframes):
-                extractor_type = 'generic'
-                server_name = f'Server {i+1}'
-                if 'cizgiduo.online' in iframe_url:
-                    extractor_type = 'cizgiduo'
-                    server_name = 'CizgiDuo'
-                elif 'cizgipass' in iframe_url:
-                    extractor_type = 'cizgipass'
-                    server_name = 'CizgiPass'
-                elif 'drive.google.com' in iframe_url:
-                    extractor_type = 'googledrive'
-                    server_name = 'GdrivePlayer'
-                elif 'video.sibnet.ru' in iframe_url:
-                    extractor_type = 'sibnet'
-                    server_name = 'SibNet'
-                    
-                random_id = ''.join(random.choices('0123456789abcdefghijklmnopqrstuvwxyz', k=8))
-                encoded = urllib.parse.quote(iframe_url, safe=";/?:@&=+$,%")
-                instructions.append({
-                    "requestId": f"cizgivedizi-extract-{int(time.time()*1000)}-{random_id}-{i}",
-                    "purpose": "extractor",
-                    "url": encoded,
-                    "method": "GET",
-                    "headers": get_enhanced_headers(encoded),
-                    "metadata": {
-                        "originalUrl": metadata.get('originalUrl') or url,
-                        "extractorType": extractor_type,
-                        "serverName": server_name
+        return {"streams": []}
+
+    def _gdrive_video(self, body, metadata):
+        streams = []
+        try:
+            data = json.loads(body)
+            play_url = metadata.get('playUrl')
+            key_hex = metadata.get('keyHex')
+            server_name = metadata.get('serverName') or 'GDrive'
+            for q in data.get('qualities', []):
+                quality = q.get('quality')
+                streams.append({
+                    "name": f"{server_name} {quality}p",
+                    "title": f"{server_name} {quality}p",
+                    "url": f"{play_url}/?video_id={key_hex}&quality={quality}&action=p",
+                    "behaviorHints": {
+                        "notWebReady": False,
+                        "bingeGroup": "cizgivedizi-stream",
+                        "proxyHeaders": {"request": {"User-Agent": "Mozilla/5.0", "Referer": "https://gdplayer.vip/"}}
                     }
                 })
-            return {"instructions": instructions}
-            
-        elif purpose == 'extractor':
-            extractor_type = metadata.get('extractorType', 'generic')
-            server_name = metadata.get('serverName', 'CizgiveDizi')
-            original_url = metadata.get('originalUrl', url)
-            encoded_url = urllib.parse.quote(url, safe=";/?:@&=+$,%")
-            
-            streams = []
-            if extractor_type in ['cizgiduo', 'cizgipass']:
-                match = re.search(r"bePlayer\('([^']+)',\s*'(\{[^}]+\})'\);", body)
-                if match:
-                    password = match.group(1)
-                    data = match.group(2)
-                    decrypted = crypto_aes_handler(data, password, False)
-                    if decrypted:
-                        v_match = re.search(r'video_location":"([^"]+)', decrypted)
-                        if v_match:
-                            m3u_url = v_match.group(1).replace('\\', '')
-                            streams.append({
-                                "name": server_name,
-                                "title": server_name,
-                                "url": m3u_url,
-                                "behaviorHints": {
-                                    "notWebReady": False,
-                                    "bingeGroup": 'cizgivedizi-stream',
-                                    "proxyHeaders": {
-                                        "request": {
-                                            "User-Agent": "Mozilla/5.0",
-                                            "Referer": encoded_url
-                                        }
-                                    }
-                                }
-                            })
-            elif extractor_type == 'googledrive':
-                parts = url.split('/d/')
-                if len(parts) > 1:
-                    url_id = parts[1].split('/')[0]
-                    random_id = ''.join(random.choices('0123456789abcdefghijklmnopqrstuvwxyz', k=8))
-                    return {
-                        "instructions": [{
-                            "requestId": f"cizgivedizi-gdrive-api-{int(time.time()*1000)}-{random_id}",
-                            "purpose": "googledrive-api",
-                            "url": "https://gdplayer.vip/api/video",
-                            "method": "POST",
-                            "headers": {
-                                "Content-Type": "application/x-www-form-urlencoded",
-                                "User-Agent": "Mozilla/5.0"
-                            },
-                            "body": f"file_id={url_id}&subtitle=",
-                            "metadata": {"serverName": server_name, "urlId": url_id}
-                        }]
-                    }
-            elif extractor_type == 'sibnet':
-                match = re.search(r'player\.src\(\[\{src:\s*"([^"]+)"', body)
-                if match:
-                    m3u = match.group(1)
-                    if not m3u.startswith('http'):
-                        m3u = f"https://video.sibnet.ru{m3u}"
-                    streams.append({
-                        "name": server_name,
-                        "title": server_name,
-                        "url": m3u,
-                        "behaviorHints": {
-                            "notWebReady": False,
-                            "bingeGroup": 'cizgivedizi-stream',
-                            "proxyHeaders": {
-                                "request": {"Referer": encoded_url}
-                            }
-                        }
-                    })
-            else:
-                m3u = re.search(r'file:\s*["\']([^"\']+\.m3u8[^"\']*)["\']', body)
-                if not m3u: m3u = re.search(r'"file"\s*:\s*"([^"]+\.m3u8[^"]*)"', body)
-                if not m3u: m3u = re.search(r'source:\s*["\']([^"\']+\.m3u8[^"\']*)["\']', body)
-                if not m3u: m3u = re.search(r'(https?:\/\/[^\s"\'<>()]+\.m3u8[^\s"\'<>()]*)', body)
-                if m3u:
-                    m3u_url = m3u.group(1) if len(m3u.groups()) > 0 else m3u.group(0)
-                    streams.append({
-                        "name": server_name,
-                        "title": server_name,
-                        "url": m3u_url,
-                        "behaviorHints": {
-                            "notWebReady": False,
-                            "bingeGroup": 'cizgivedizi-stream',
-                            "proxyHeaders": {"request": {"Referer": encoded_url}}
-                        }
-                    })
-            return {"streams": streams}
-            
-        elif purpose == 'googledrive-api':
-            try:
-                data = json.loads(body)
-                if data.get('status') == 'success' and 'embedUrl' in data.get('data', {}):
-                    embed_url = data['data']['embedUrl']
-                    random_id = ''.join(random.choices('0123456789abcdefghijklmnopqrstuvwxyz', k=8))
-                    return {
-                        "instructions": [{
-                            "requestId": f"cizgivedizi-gdrive-embed-{int(time.time()*1000)}-{random_id}",
-                            "purpose": "googledrive-embed",
-                            "url": embed_url,
-                            "method": "GET",
-                            "headers": get_enhanced_headers('https://gdplayer.vip/'),
-                            "metadata": {"serverName": metadata.get('serverName')}
-                        }]
-                    }
-            except Exception:
-                pass
-            return {"streams": []}
-            
-        elif purpose == 'googledrive-embed':
-            soup = BeautifulSoup(body, 'html.parser')
-            body_el = soup.select_one('body[ng-init]')
-            if body_el:
-                ng_init = body_el.get('ng-init')
-                match = re.search(r"init\('([^']+)',\s*'([^']+)',\s*'([^']+)',\s*'([^']*)'\)", ng_init)
-                if match:
-                    play_url = match.group(1)
-                    key_hex = match.group(2)
-                    video_api = f"{play_url}/?video_id={key_hex}&action=get_video"
-                    random_id = ''.join(random.choices('0123456789abcdefghijklmnopqrstuvwxyz', k=8))
-                    return {
-                        "instructions": [{
-                            "requestId": f"cizgivedizi-gdrive-video-{int(time.time()*1000)}-{random_id}",
-                            "purpose": "googledrive-video",
-                            "url": video_api,
-                            "method": "GET",
-                            "headers": {
-                                "User-Agent": "Mozilla/5.0",
-                                "Referer": "https://gdplayer.vip/"
-                            },
-                            "metadata": {
-                                "serverName": metadata.get('serverName'),
-                                "playUrl": play_url,
-                                "keyHex": key_hex
-                            }
-                        }]
-                    }
-            return {"streams": []}
-            
-        elif purpose == 'googledrive-video':
-            streams = []
-            try:
-                data = json.loads(body)
-                if 'qualities' in data:
-                    play_url = metadata.get('playUrl')
-                    key_hex = metadata.get('keyHex')
-                    server_name = metadata.get('serverName')
-                    for q in data['qualities']:
-                        quality = q.get('quality')
-                        v_url = f"{play_url}/?video_id={key_hex}&quality={quality}&action=p"
-                        streams.append({
-                            "name": f"{server_name} {quality}p",
-                            "title": f"{server_name} {quality}p",
-                            "url": v_url,
-                            "behaviorHints": {
-                                "notWebReady": False,
-                                "bingeGroup": 'cizgivedizi-stream',
-                                "proxyHeaders": {
-                                    "request": {
-                                        "User-Agent": "Mozilla/5.0",
-                                        "Referer": "https://gdplayer.vip/"
-                                    }
-                                }
-                            }
-                        })
-            except Exception:
-                pass
-            return {"streams": streams}
-            
-        return {"ok": True}
+        except Exception:
+            pass
+        return {"streams": streams}

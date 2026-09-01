@@ -303,16 +303,23 @@ class DiziMagScraper:
                     instructions.append({
                         'requestId': f"dizimag-part-{int(time.time()*1000)}-{randomId}",
                         'purpose': 'part-getir',
-                        'url': 'https://dizimag.eu/partgetirply.php',
+                        'url': f"{self.BASE_URL}/partgetirply.php",
                         'method': 'POST',
+                        # AJAX endpoint: must be a plain fetch, NOT a hidden-webview
+                        # navigation. A webview load waits for the returned <iframe>
+                        # (the external player) to finish and hits the 5 s timeout.
                         'headers': {
-                            'Content-Type': 'application/x-www-form-urlencoded',
+                            'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
                             'Referer': url,
-                            'Accept': '*/*'
+                            'Origin': self.BASE_URL,
+                            'Accept': '*/*',
+                            'X-Requested-With': 'XMLHttpRequest',
+                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:139.0) Gecko/20100101 Firefox/139.0',
+                            '__COOKIE_HINT__': 'FLUTTER_INJECT_WEBVIEW_COOKIES'
                         },
                         'body': f"data={postid}%2C{partno}",
                         'metadata': {
-                            'hiddenweb': True,
+                            'hiddenweb': False,
                             'sourceName': source_name,
                             'lang': lang,
                             'originalUrl': url
@@ -322,8 +329,14 @@ class DiziMagScraper:
             return {'instructions': instructions}
 
         if purpose == 'part-getir':
-            m = re.search(r'(https?://[^\s<>"\'\\]+)', body)
-            iframe_url = m.group(1).replace('\\/', '/') if m else body.strip()
+            raw = (body or '').strip()
+            # response can be a bare URL, JSON, or an <iframe src="..."> snippet
+            m = (re.search(r'src=["\']([^"\']+)["\']', raw)
+                 or re.search(r'(https?:\\?/\\?/[^\s<>"\'\\]+)', raw))
+            iframe_url = (m.group(1) if m else raw).replace('\\/', '/').strip()
+            if iframe_url.startswith('//'):
+                iframe_url = 'https:' + iframe_url
+            print(f"🎬 [DiziMag] part-getir -> {iframe_url[:120]!r}")
             
             if iframe_url and iframe_url.startswith('http'):
                 if iframe_url.endswith('.m3u8') or iframe_url.endswith('.mp4'):

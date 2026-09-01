@@ -103,6 +103,78 @@ def dc_hello(base64_input, magic_number=399756995, js_body=""):
         traceback.print_exc()
         return None
 
+def _b64_any(data):
+    """str veya bytes → bytes (base64, url-safe ve padding toleranslı)"""
+    if isinstance(data, bytes):
+        data = data.decode('latin1')
+    data = data.strip().replace('\\/', '/').replace('\\', '')
+    data = data.replace('-', '+').replace('_', '/')
+    data = re.sub(r'[^A-Za-z0-9+/]', '', data)
+    data += '=' * (-len(data) % 4)
+    return base64.b64decode(data)
+
+def _rot_bytes(data, n):
+    s = data.decode('latin1') if isinstance(data, bytes) else data
+    return rot_n(s, n)
+
+def dc_generic(base64_input, js_body):
+    """js_body'deki unmix algoritmasını dinamik uygular.
+    Ön işlemler (reverse / rotN / atob, sırayla) + XOR-akümülatör döngüsü.
+    hdfilmcehennemi.mobi player'ı bu şemayı kullanıyor (fonksiyon adı ve
+    acc/step/rot parametreleri her istekte değişir)."""
+    try:
+        if not js_body or not re.search(r'\^\s*acc|acc\s*\^|\bplain\b', js_body):
+            return None
+
+        # join sonrası, unmix döngüsü öncesi blok
+        m = re.search(r'result\s*=\s*value\s*;(.*?)(?:let|var)\s+(?:unmix|acc)\b',
+                      js_body, re.DOTALL)
+        ops_block = m.group(1) if m else js_body
+
+        # ön işlemleri geçtikleri sıraya göre topla
+        ops = []
+        for mm in re.finditer(r"\.split\(\s*['\"]\s*['\"]\s*\)\s*\.reverse\(\)\s*\.join\(", ops_block):
+            ops.append((mm.start(), 'reverse', 0))
+        for mm in re.finditer(r"\.replace\(\s*/\[a-zA-Z\]/g[\s\S]*?[-+]\s*(\d+)\s*\)\s*%\s*26", ops_block):
+            ops.append((mm.start(), 'rot', int(mm.group(1))))
+        for mm in re.finditer(r"\batob\s*\(", ops_block):
+            ops.append((mm.start(), 'atob', 0))
+        ops.sort()
+
+        res = base64_input
+        for _, kind, n in ops:
+            if kind == 'reverse':
+                res = res[::-1]
+            elif kind == 'rot':
+                res = _rot_bytes(res, n)
+            elif kind == 'atob':
+                res = _b64_any(res)
+        if isinstance(res, str):
+            res = _b64_any(res)
+        if not res:
+            return None
+
+        acc_m = re.search(r'\bacc\s*=\s*(\d+)\s*;', js_body)
+        step_m = re.search(r'acc\s*=\s*\(\s*acc\s*[-+]\s*(\d+)\s*\)\s*%\s*256', js_body)
+        fb = re.search(r'acc\s*=\s*\(\s*acc\s*\+\s*b\s*\)\s*%\s*256', js_body)
+        acc = int(acc_m.group(1)) if acc_m else 0
+        step = int(step_m.group(1)) if step_m else 0
+
+        out = bytearray()
+        for b in res:
+            acc = (acc + step) % 256
+            out.append(b ^ acc)
+            if fb:
+                acc = (acc + b) % 256
+        unmix = out.decode('utf-8', 'ignore').replace('\n', '').replace('\r', '').strip()
+        if 'http' in unmix or '.m3u8' in unmix:
+            return unmix
+        print(f"⚠️  [dc_generic] XOR sonucu URL değil: {unmix[:60]}")
+        return None
+    except Exception as e:
+        print(f"⚠️  dc_generic error: {e}")
+        return None
+
 def get_and_unpack(packed_js):
     try:
         eval_pattern = re.compile(r'eval\(function\(p,a,c,k,e,(?:r|d)\)')
@@ -449,6 +521,18 @@ class HDFilmCehennemiScraper:
                     if '://' not in u:
                         u = u.replace(':/', '://', 1)
                     return u.rstrip('/')
+
+                def clean_title(t):
+                    """WebView çıktısındaki \\uXXXX kaçışlarını çöz + tekrar eden
+                    başlık parçalarını temizle (site 'TR - EN - TR' formatı veriyor)"""
+                    t = re.sub(r'\\u([0-9a-fA-F]{4})', lambda m: chr(int(m.group(1), 16)), t)
+                    t = t.replace('\\/', '/').replace('&amp;', '&').strip(' -\t\n')
+                    parts = [p.strip() for p in t.split(' - ') if p.strip()]
+                    seen = []
+                    for p in parts:
+                        if p not in seen:
+                            seen.append(p)
+                    return ' - '.join(seen) if seen else t
                 
                 # Extract all film/series page URLs from href attributes
                 raw_urls = re.findall(
@@ -474,7 +558,7 @@ class HDFilmCehennemiScraper:
                 count = min(len(raw_urls), len(raw_titles))
                 for i in range(count):
                     href = clean_url(raw_urls[i])
-                    title = raw_titles[i].strip()
+                    title = clean_title(raw_titles[i])
                     poster = clean_url(raw_posters[i]) if i < len(raw_posters) else ''
                     year = raw_years[i] if i < len(raw_years) else ''
                     
@@ -585,10 +669,24 @@ class HDFilmCehennemiScraper:
             soup = BeautifulSoup(body, 'html.parser')
 
             title_elem = soup.find('h1', class_='section-title')
-            title = title_elem.text.replace(' izle', '').strip() if title_elem else 'Bilinmeyen'
+            if title_elem:
+                small = title_elem.find('small')  # <small>(2026)</small> → başlıktan çıkar
+                if small:
+                    small.extract()
+                title = title_elem.get_text(strip=True).replace(' izle', '').strip()
+            else:
+                title = 'Bilinmeyen'
 
             poster_elems = soup.select('aside.post-info-poster img.lazyload')
             poster = poster_elems[-1].get('data-src') if poster_elems else None
+
+            # Yatay kapak görseli (varsa background için poster yerine bunu kullan)
+            cover_elem = soup.select_one('div.play-that-video img')
+            background = poster
+            if cover_elem:
+                cover_src = cover_elem.get('data-src') or cover_elem.get('src') or ''
+                if cover_src.startswith('http'):
+                    background = cover_src
 
             desc_elem = soup.select_one('article.post-info-content > p')
             description = desc_elem.text.strip() if desc_elem else 'Açıklama mevcut değil'
@@ -662,7 +760,7 @@ class HDFilmCehennemiScraper:
                     'type': 'series',
                     'name': title,
                     'poster': poster,
-                    'background': poster,
+                    'background': background,
                     'description': description,
                     'releaseInfo': year,
                     'imdbRating': rating,
@@ -680,7 +778,7 @@ class HDFilmCehennemiScraper:
                     'type': 'movie',
                     'name': title,
                     'poster': poster,
-                    'background': poster,
+                    'background': background,
                     'description': description,
                     'releaseInfo': year,
                     'imdbRating': rating,
@@ -948,7 +1046,14 @@ class HDFilmCehennemiScraper:
                         
                         # Join edip dene (site genelde tüm parçaları birleştiriyor)
                         joined = "".join(arrayItems)
-                        decoded = dc_hello(joined, magic_number, js_body)
+
+                        # Önce XOR-akümülatör şeması (mobi player)
+                        decoded = dc_generic(joined, js_body)
+                        if decoded and ('http' in decoded or '.m3u8' in decoded):
+                            finalUrl = decoded
+                            print(f"✅ [stream_extract] dc_generic (XOR) URL: {finalUrl[:80]}...")
+
+                        decoded = None if finalUrl else dc_hello(joined, magic_number, js_body)
                         if decoded:
                             print(f"🔍 [stream_extract] dc_hello joined decoded: {repr(decoded[:100])}")
                         if decoded and ('http' in decoded or '.m3u8' in decoded):
@@ -997,13 +1102,37 @@ class HDFilmCehennemiScraper:
 
                 if finalUrl and finalUrl.startswith('http'):
                     finalUrl = finalUrl.replace('\\/', '/').replace('\\', '')
-                    streamType = 'm3u8' if '.m3u8' in finalUrl else 'mp4'
+                    # .m3u8 veya HLS playlist (master.txt / /txt/ – mobi player böyle veriyor)
+                    _isHls = ('.m3u8' in finalUrl or 'master.txt' in finalUrl
+                              or '/txt/' in finalUrl or '/hls/' in finalUrl)
+                    streamType = 'm3u8' if _isHls else 'mp4'
+
+                    # CDN (rapidrame/mobi) m3u8'i Referer/Origin kontrolü yapıyor →
+                    # iframe sayfasının URL'sini proxyHeaders olarak geç
+                    iframePageUrl = (
+                        url
+                        or fetchResult.get('metadata', {}).get('originalIframe')
+                        or f"{self.BASE_URL}/"
+                    )
+                    parsedIframe = urllib.parse.urlparse(iframePageUrl)
+                    iframeOrigin = f"{parsedIframe.scheme}://{parsedIframe.netloc}"
+                    proxyHeaders = {
+                        'request': {
+                            'Referer': iframePageUrl,
+                            'Origin': iframeOrigin,
+                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+                        }
+                    }
+
                     streamData = {
                         'name': streamName,
                         'title': streamName,
                         'url': finalUrl,
                         'type': streamType,
-                        'behaviorHints': {'notWebReady': False}
+                        'behaviorHints': {
+                            'notWebReady': False,
+                            'proxyHeaders': proxyHeaders
+                        }
                     }
                     if subtitles: streamData['subtitles'] = subtitles
                     if audioTracks: streamData['audioTracks'] = audioTracks
@@ -1012,6 +1141,17 @@ class HDFilmCehennemiScraper:
                     print(f"   📝 Subtitles: {len(subtitles)}, 🎵 Audio: {len(audioTracks)}")
                 else:
                     print(f"⚠️  [stream_extract] Video URL bulunamadı!")
+                    # DEBUG: çözülemeyen player'ı incelemek için dump al
+                    try:
+                        dbg_name = f"debug_extract_{int(time.time())}.txt"
+                        with open(dbg_name, "w", encoding="utf-8") as _f:
+                            _f.write(f"URL: {url}\n\n=== COMBINED (unpacked) ===\n")
+                            _f.write(combined_content)
+                            _f.write("\n\n=== RAW BODY ===\n")
+                            _f.write(body)
+                        print(f"🐛 [stream_extract] Debug dump: {dbg_name}")
+                    except Exception as _e:
+                        print(f"🐛 dump hatası: {_e}")
 
             except Exception as e:
                 print(f"⚠️  Stream extract error: {e}")

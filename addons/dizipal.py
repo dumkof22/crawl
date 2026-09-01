@@ -18,7 +18,7 @@ def base64_decode_safe(s):
 
 class DiziPalScraper:
     def __init__(self):
-        self.BASE_URL = 'https://dizipal1560.com'
+        self.BASE_URL = 'https://dizipal1578.com'
         self.manifest = {
             'id': 'community.dizipal',
             'version': '2.0.0',

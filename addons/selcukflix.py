@@ -29,6 +29,27 @@ def base64_decode_iso(s):
 def base64_encode_safe(s):
     return base64.b64encode(s.encode('utf-8')).decode('utf-8').replace('=', '')
 
+def extract_json_body(body):
+    """Flutter's webview renders raw JSON endpoints as an HTML page that wraps
+    the payload in <pre>...</pre> (Chrome's built-in JSON viewer). Unwrap it so
+    json.loads() sees the actual JSON."""
+    if not body:
+        return body
+    stripped = body.strip()
+    if stripped.startswith('{') or stripped.startswith('['):
+        return stripped
+    head = stripped[:2000].lower()
+    if '<pre' in head or '<html' in head:
+        try:
+            soup = BeautifulSoup(body, 'html.parser')
+            pre = soup.find('pre')
+            text = (pre.get_text() if pre else soup.get_text()).strip()
+            if text.startswith('{') or text.startswith('['):
+                return text
+        except Exception:
+            pass
+    return stripped
+
 def fix_poster_url(url):
     if not url: return None
     return url \
@@ -279,7 +300,7 @@ class SelcukFlixScraper:
             is_bad_body = True
         elif 'chrome-error' in body.lower():
             is_bad_body = True
-        elif purpose in ['catalog-api', 'catalog-search'] and not body.strip().startswith('{'):
+        elif purpose in ['catalog-api', 'catalog-search'] and not extract_json_body(body).startswith('{'):
             is_bad_body = True
 
         if is_bad_body and url:
@@ -287,7 +308,7 @@ class SelcukFlixScraper:
 
         if purpose == 'catalog-search':
             try:
-                response = json.loads(body)
+                response = json.loads(extract_json_body(body))
                 if 'response' not in response:
                     return {'metas': []}
 
@@ -407,7 +428,7 @@ class SelcukFlixScraper:
         if purpose == 'catalog-api':
             try:
                 print(f"🔍 [catalog-api] Body length: {len(body)} First 100: {body[:100]}")
-                response = json.loads(body)
+                response = json.loads(extract_json_body(body))
                 if 'response' not in response:
                     return {'metas': []}
 
@@ -909,6 +930,7 @@ class SelcukFlixScraper:
 
         if purpose == 'contentx-source':
             try:
+                body = extract_json_body(body)
                 m3uLink = None
                 try:
                     jsonData = json.loads(body)
@@ -1059,6 +1081,7 @@ class SelcukFlixScraper:
                 
         if purpose == 'contentx-dublaj':
             try:
+                body = extract_json_body(body)
                 dublajM3u = None
                 try:
                     jsonData = json.loads(body)
@@ -1133,6 +1156,7 @@ class SelcukFlixScraper:
                 
         if purpose in ['m3u8-resolve', 'dublaj-m3u8-resolve']:
             try:
+                body = extract_json_body(body)
                 realM3u8Url = None
                 redirectUrl = body.strip()
                 
@@ -1191,7 +1215,7 @@ class SelcukFlixScraper:
 
         if purpose == 'trstx-post':
             try:
-                data = json.loads(body)
+                data = json.loads(extract_json_body(body))
                 streams = []
                 extractorName = metadata.get('extractorName', 'TRsTX')
                 videoData = data[1:] if len(data) > 1 else []

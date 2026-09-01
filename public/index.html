@@ -484,7 +484,9 @@
     </div>
 
     <script>
-        const addonsData = [
+        // Statik meta bilgileri (ikon / özellikler). Kartlar yalnızca sunucuda
+        // gerçekten kayıtlı ve ismi olan eklentiler için /api/addons'tan üretilir.
+        const addonMeta = [
             {
                 icon: '🤖',
                 name: 'Gemini AI Finder',
@@ -655,6 +657,9 @@
             }
         ];
 
+        const metaById = {};
+        addonMeta.forEach(m => { metaById[m.addonId] = m; });
+
         // Get current server URL
         const protocol = window.location.protocol;
         const hostname = window.location.hostname;
@@ -664,12 +669,40 @@
         // Update server info
         document.getElementById('serverUrl').textContent = `${protocol}//${hostname}${port ? ':' + port : ''}`;
         document.getElementById('serverPort').textContent = port || '80/443';
-        document.getElementById('addonCount').textContent = addonsData.length;
 
-        // Generate addon cards
         const addonsGrid = document.getElementById('addonsGrid');
+        let addonsData = [];
 
-        addonsData.forEach(addon => {
+        // Sunucudaki gerçek eklentileri çek; yalnızca ismi olanları göster
+        fetch(`${baseUrl}/api/addons`)
+            .then(res => res.json())
+            .then(data => {
+                addonsData = (data.addons || [])
+                    .filter(a => a.name && String(a.name).trim().length > 0
+                        && a.description !== 'Python port is pending.')
+                    .map(a => {
+                        const meta = metaById[a.id] || {};
+                        return {
+                            addonId: a.id,
+                            name: a.name,
+                            icon: meta.icon || '🎬',
+                            description: meta.description || a.description || '',
+                            features: meta.features || []
+                        };
+                    });
+
+                document.getElementById('addonCount').textContent = addonsData.length;
+                renderAddons();
+            })
+            .catch(err => {
+                console.error('Addon listesi yüklenemedi:', err);
+                document.getElementById('addonCount').textContent = '0';
+                addonsGrid.innerHTML = '<p style="opacity:0.9;">Eklenti listesi yüklenemedi.</p>';
+            });
+
+        function renderAddons() {
+            addonsGrid.innerHTML = '';
+            addonsData.forEach(addon => {
             const manifestUrl = `${baseUrl}/api/addon/${addon.addonId}/manifest.json`;
             const protocolType = protocol === 'https:' ? 'https' : 'http';
             const MindUrl = `mind://${protocolType}/${manifestUrl.replace(`${protocol}//`, '')}`;
@@ -697,7 +730,8 @@
                 </div>
             `;
             addonsGrid.appendChild(card);
-        });
+            });
+        }
 
         // Add click event listeners to copy buttons
         document.addEventListener('click', function (e) {

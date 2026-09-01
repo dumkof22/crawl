@@ -2,14 +2,23 @@ import json
 import random
 import asyncio
 import time
+import uuid
+import urllib.parse
+
+# ytdlp.online — instruction-mode ile kullanılan public yt-dlp servisi.
+#   GET /api/v1/stream?command=<yt-dlp komutu>&job_id=<uuid>&source=index&engine=nightly
+#   -> SSE gövdesi: "data: <satır>" frame'leri, sonda "event: close".
+# NOT: anonim kullanıcıda IP başına GÜNDE 5 istek limiti var; dönen googlevideo URL'leri
+# ytdlp.online sunucu IP'sine kilitli olabilir (playback cihazda 403 verebilir).
+YTDLP_ONLINE_BASE = "https://ytdlp.online"
 
 class YouTubeScraper:
     def __init__(self):
         self.manifest = {
             'id': 'community.youtube.mind',
-            'version': '1.1.0',
-            'name': 'YouTube (yt-dlp)',
-            'description': 'YouTube videoları arama, trendler ve kanallar eklentisi (yt-dlp altyapılı)',
+            'version': '1.2.0',
+            'name': 'YouTube',
+            'description': 'YouTube videoları arama, trendler ve kanallar eklentisi',
             'logo': 'https://upload.wikimedia.org/wikipedia/commons/thumb/0/09/YouTube_full-color_icon_%282017%29.svg/1024px-YouTube_full-color_icon_%282017%29.svg.png',
             'resources': ['catalog', 'meta', 'stream'],
             'types': ['movie', 'series', 'channel', 'tv'],
@@ -70,31 +79,71 @@ class YouTubeScraper:
         }
 
     async def handleStream(self, args):
-        video_id = args.get('id', '').replace('youtube:', '')
-        if not video_id: return {'streams': []}
+        print(f"🔎 [youtube] handleStream RAW args: {json.dumps(args, ensure_ascii=False)}")
+        raw_id = args.get('id', '')
+        video_id = raw_id.replace('youtube:', '').strip()
+        print(f"🔎 [youtube] raw_id={raw_id!r} -> video_id={video_id!r}")
+        if not video_id:
+            print("⚠️ [youtube] video_id boş, streams: []")
+            return {'streams': []}
 
+        # Direkt CDN URL'ini ytdlp.online üzerinden (instruction mode) çekiyoruz.
+        # Fetch Flutter tarafında yapılır; SSE gövdesi processFetchResult'ta ayrıştırılır.
+        watch_url = f"https://www.youtube.com/watch?v={video_id}"
+        # 22 (720p muxed) -> 18 (360p muxed) -> best (tek dosya) : oynatıcı tek URL ister
+        command = f'--get-url --no-playlist -f 22/18/best "{watch_url}"'
+        job_id = str(uuid.uuid4())
+        stream_url = (
+            f"{YTDLP_ONLINE_BASE}/api/v1/stream"
+            f"?command={urllib.parse.quote(command)}"
+            f"&job_id={job_id}&source=index&engine=nightly"
+        )
         randomId = ''.join(random.choices('abcdefghijklmnopqrstuvwxyz0123456789', k=8))
-        return {
+        result = {
             'instructions': [{
                 'requestId': f"yt-stream-{int(time.time()*1000)}-{randomId}",
                 'purpose': 'stream',
-                'url': f"https://www.youtube.com/watch?v={video_id}",
+                'url': stream_url,
                 'method': 'GET',
-                'headers': {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'},
-                'metadata': {'videoId': video_id}
+                'headers': {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                    'Referer': f"{YTDLP_ONLINE_BASE}/",
+                    'Accept': 'text/event-stream'
+                },
+                'metadata': {'videoId': video_id, 'hiddenweb': False}
             }]
+        }
+        print(f"✅ [youtube] handleStream -> ytdlp.online instruction: {stream_url}")
+        return result
+
+    def _fallback_streams(self, video_id):
+        # ytdlp.online'dan URL alınamazsa: YouTube'u cihazın kendi webview'inde aç.
+        return {
+            'streams': [
+                {
+                    'name': 'YouTube', 'title': 'YouTube Player (gömülü)',
+                    'url': f"https://www.youtube.com/embed/{video_id}?autoplay=1&playsinline=1",
+                    'type': 'movie',
+                    'behaviorHints': {'notWebReady': False, 'bingeGroup': 'youtube'}
+                },
+                {
+                    'name': 'YouTube', 'title': 'YouTube Sayfası (webview)',
+                    'url': f"https://www.youtube.com/watch?v={video_id}",
+                    'type': 'movie',
+                    'behaviorHints': {'notWebReady': False, 'bingeGroup': 'youtube'}
+                },
+                {
+                    'name': 'YouTube', 'title': 'Tarayıcı / YouTube uygulamasında aç',
+                    'externalUrl': f"https://www.youtube.com/watch?v={video_id}",
+                    'behaviorHints': {'notWebReady': True}
+                }
+            ]
         }
 
     async def processFetchResult(self, fetchResult):
         purpose = fetchResult.get('purpose')
         metadata = fetchResult.get('metadata', {})
-        
-        try:
-            import yt_dlp
-        except ImportError:
-            print("yt-dlp kütüphanesi bulunamadı! 'pip install yt-dlp' ile kurunuz.")
-            return {'ok': False, 'error': 'yt-dlp eksik'}
-            
+
         if purpose == 'catalog':
             html = fetchResult.get('body', '')
             if not html: html = ""
@@ -165,76 +214,54 @@ class YouTubeScraper:
             return {'meta': meta}
 
         elif purpose == 'stream':
-            video_id = metadata.get('videoId')
-            html = fetchResult.get('body', '')
-            
-            # 1) Önce HTML içerisindeki ytInitialPlayerResponse datasını arayalım (Render IP ban'ı atlamak için)
             import re
-            import urllib.parse
-            
-            try:
-                # ytInitialPlayerResponse içinden url bulma
-                player_res_match = re.search(r'ytInitialPlayerResponse\s*=\s*({.+?});</script>', html)
-                if player_res_match:
-                    player_data = json.loads(player_res_match.group(1))
-                    streaming_data = player_data.get('streamingData', {})
-                    formats = streaming_data.get('formats', []) + streaming_data.get('adaptiveFormats', [])
-                    
-                    # 720p veya mp4 bulmaya çalışalım
-                    best_url = None
-                    for f in formats:
-                        if 'url' in f:
-                            # ses ve görüntü olanı tercih et
-                            if 'audio' in f.get('mimeType', '') or 'video' in f.get('mimeType', ''):
-                                best_url = f['url']
-                                if 'mp4' in f.get('mimeType', '') and '720p' in f.get('qualityLabel', ''):
-                                    break # En iyi seçenek
-                    
-                    if best_url:
-                        return {
-                            'streams': [{
-                                'url': best_url,
-                                'name': 'YouTube',
-                                'title': '720p / MP4',
-                                'behaviorHints': {'notWebReady': False}
-                            }]
-                        }
-            except Exception as e:
-                print(f"HTML ayrıştırma hatası: {e}")
-            
-            # 2) Eğer HTML üzerinden URL bulamazsak, alternatif olarak sunucuda yt-dlp kullanmayı deneriz.
-            # Render üzerinde IP ban sebebiyle hata verebilir, bu yüzden yukarıdaki HTML parse her zaman önceliklidir.
-            try:
-                import yt_dlp
-                ydl_opts = {
-                    'format': 'best',
-                    'quiet': True,
-                    'no_warnings': True,
-                    'extract_flat': False
-                }
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
-                    stream_url = info.get('url')
-                    if stream_url:
-                        return {
-                            'streams': [{
-                                'url': stream_url,
-                                'name': 'YouTube (yt-dlp)',
-                                'title': 'Auto Quality',
-                                'behaviorHints': {'notWebReady': False}
-                            }]
-                        }
-            except Exception as e:
-                print(f"yt-dlp stream hatası: {e}")
-                
-            # Tüm denemelere rağmen URL bulunamazsa, fallback olarak ytId döndürüyoruz
-            return {
-                'streams': [{
-                    'ytId': video_id,
-                    'name': 'YouTube',
-                    'title': 'YouTube Video (Fallback)',
-                    'behaviorHints': {'notWebReady': False}
-                }]
-            }
+            import html as _html
+            video_id = metadata.get('videoId')
+            body = fetchResult.get('body', '') or ''
+            print(f"🔎 [youtube] stream SSE body ({len(body)} bytes): {body[:600]}")
+
+            # SSE "data: ..." satırlarını topla, HTML-entity çöz
+            lines = []
+            for m in re.finditer(r'^data:\s?(.*)$', body, re.MULTILINE):
+                lines.append(_html.unescape(m.group(1).strip()))
+            joined = "\n".join(lines)
+
+            # Limit / hata mesajı kontrolü
+            low = joined.lower()
+            if 'daily launch limit' in low or 'limit reached' in low:
+                print("⚠️ [youtube] ytdlp.online günlük limit doldu -> fallback")
+                return self._fallback_streams(video_id)
+
+            # googlevideo / m3u8 URL'leri çıkar
+            urls = re.findall(r'https://[^\s"\'<>]+(?:googlevideo\.com|\.m3u8)[^\s"\'<>]*', joined)
+            urls = [u for u in urls if 'videoplayback' in u or '.m3u8' in u]
+
+            streams = []
+            if urls:
+                u = urls[0]
+                itag = re.search(r'[?&]itag=(\d+)', u)
+                is_hls = '.m3u8' in u
+                streams.append({
+                    'name': 'YouTube (ytdlp.online)',
+                    'title': ('HLS' if is_hls else f"MP4 (itag {itag.group(1)})" if itag else 'MP4'),
+                    'url': u,
+                    'type': 'm3u8' if is_hls else 'mp4',
+                    'behaviorHints': {
+                        'notWebReady': True,
+                        'bingeGroup': 'youtube',
+                        'proxyHeaders': {'request': {
+                            'User-Agent': 'Mozilla/5.0',
+                            'Referer': 'https://www.youtube.com/',
+                            'Origin': 'https://www.youtube.com'
+                        }}
+                    }
+                })
+                print(f"✅ [youtube] ytdlp.online URL bulundu: {u[:120]}...")
+            else:
+                print("⚠️ [youtube] ytdlp.online SSE'de URL yok -> fallback")
+
+            # Her durumda webview yedeklerini de ekle
+            streams += self._fallback_streams(video_id)['streams']
+            return {'streams': streams}
 
         return {'ok': True}
