@@ -94,12 +94,6 @@ except ImportError:
     fullhdfilmizlesene_addon = DummyAddon("FullHDFilmIzlesene")
 
 try:
-    from addons.webspor import WebsporScraper
-    webspor_addon = WebsporScraper()
-except ImportError:
-    webspor_addon = DummyAddon("Webspor")
-
-try:
     from addons.selcukflix import SelcukFlixScraper
     selcukflix_addon = SelcukFlixScraper()
 except ImportError:
@@ -124,13 +118,6 @@ except ImportError:
     dizibox_addon = DummyAddon("DiziBox")
 
 try:
-    from addons.ai_addon import GeminiAIFinderScraper
-    ai_addon = GeminiAIFinderScraper()
-except ImportError as e:
-    print(f"Error loading AI Addon: {e}")
-    ai_addon = DummyAddon("GeminiAIFinder")
-
-try:
     from addons.youtube import YouTubeScraper
     youtube_addon = YouTubeScraper()
 except ImportError:
@@ -149,12 +136,10 @@ addon_modules = {
     'inatbox': inatbox_addon,
     'selcuksports': selcuk_addon,
     'sporcafe': sporcafe_addon,
-    'webspor': webspor_addon,
     'selcukflix': selcukflix_addon,
     'dizipal': dizipal_addon,
     'dizimag': dizimag_addon,
     'dizibox': dizibox_addon,
-    'ai.gemini.finder': ai_addon,
     'youtube': youtube_addon,
     'belgeselx': belgeselx_addon,
     # ... Diğer eklentilerin buraya eklenecek
@@ -199,14 +184,13 @@ print(f"\n🚀 Mind IPTV Backend Server (Instruction/Crawl4AI Hybrid Architectur
 print(f"📦 Loaded {len(addon_modules)} addon(s):\n")
 
 addon_categories = {
-    '🤖 AI Araçları': ['ai.gemini.finder'],
     '🎬 Film & Dizi': ['fullhdfilmizlesene', 'hdfilmcehennemi', 'dizibox', 'dizipal', 'selcukflix', 'dizigom', 'dizimag', '4kfilmizlesene', 'sinefy', 'webteizle'],
     '📺 Dizi': ['dizist', 'dizigom', 'dizimag'],
     '🎌 Anime': ['animecix'],
     '🎨 Çizgi Film': ['cizgimax', 'cizgivedizi'],
     '📚 Belgesel': ['belgeselx'],
     '📺 Canlı TV & Programlar': ['inatbox', 'canlitv', 'tv8', 'kicktr'],
-    '⚽ Spor': ['selcuksports', 'sporcafe', 'webspor'],
+    '⚽ Spor': ['selcuksports', 'sporcafe'],
     '🌐 Platformlar': ['youtube']
 }
 
