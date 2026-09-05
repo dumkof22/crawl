@@ -249,11 +249,12 @@ async def get_all_addons(request: Request):
         manifest = addon.getManifest() if hasattr(addon, 'getManifest') else getattr(addon, 'manifest', {})
         base_url = str(request.base_url).rstrip('/')
         
-        addon_data = {
-            "id": addon_id,
-            "manifestUrl": f"{base_url}/api/addon/{addon_id}/manifest.json",
-        }
+        addon_data = {}
         addon_data.update(manifest)
+        # Manifest içindeki Stremio "id" alanı (ör. "community.xxx") route key'inin
+        # üzerine yazmasın; frontend install linkini bu alandan kuruyor.
+        addon_data["id"] = addon_id
+        addon_data["manifestUrl"] = f"{base_url}/api/addon/{addon_id}/manifest.json"
         addons.append(addon_data)
     return {"addons": addons}
 
