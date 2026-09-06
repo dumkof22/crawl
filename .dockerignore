@@ -1,0 +1,17 @@
+.git
+.github
+venv/
+env/
+__pycache__/
+**/__pycache__/
+*.pyc
+node_modules/
+scratch*
+scratch/
+*.log
+.DS_Store
+.env
+
+# Reference scrape dumps — not used by the Python app at runtime
+*.js
+test_search2.html

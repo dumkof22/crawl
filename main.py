@@ -43,6 +43,12 @@ def save_config():
 
 load_config()
 
+# Public deploy'da (Render vb.) admin şifresini config dosyası yerine ortam
+# değişkeninden al; ADMIN_PASSWORD tanımlıysa dosyadaki değeri override eder.
+_env_admin_password = os.environ.get('ADMIN_PASSWORD')
+if _env_admin_password:
+    addon_config['adminPassword'] = _env_admin_password
+
 # ==========================================
 # 2. EKLENTİ (ADDON) MODÜLLERİ
 # ==========================================
