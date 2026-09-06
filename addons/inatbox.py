@@ -756,8 +756,14 @@ class InatBoxScraper:
             print(f"🐛 [InatBox Debug] Search '{searchQuery}': {len(items)} matches", flush=True)
 
         skip = int(metadata.get('skip', 0))
-        page = items[skip:skip + 100]
-        print(f"🐛 [InatBox Debug] After pagination (skip={skip}): {len(page)} items", flush=True)
+        # İstemci `extra.limit` ile büyük dilim isteyebilir (toplu arka plan
+        # senkronu). Tavan 5000 — tek yanıtı makul tut. Varsayılan 100.
+        try:
+            limit = max(1, min(5000, int(metadata.get('limit', 100) or 100)))
+        except (TypeError, ValueError):
+            limit = 100
+        page = items[skip:skip + limit]
+        print(f"🐛 [InatBox Debug] After pagination (skip={skip}, limit={limit}): {len(page)} items", flush=True)
 
         metas = []
         for item in page:
@@ -793,21 +799,28 @@ class InatBoxScraper:
         extra = args.get('extra', {})
         searchQuery = extra.get('search')
         skip = int(extra.get('skip', 0))
-        
-        print(f"📋 [InatBox Catalog] Catalog ID: {catalogId}, Search: {searchQuery}, Skip: {skip}")
-        
-        # Dev listeler (4K ~18k, list2 ~12k) skip>0 sayfaları: ilk sayfada (skip=0)
-        # doldurulan RAM cache'ten doğrudan {'metas': dilim} dön — 16 MB'lık yeniden
-        # fetch yok. inat_search (çok katalog tek key) ve GET_CATALOGS hariç. Cache
+        try:
+            limit = max(1, min(5000, int(extra.get('limit', 100) or 100)))
+        except (TypeError, ValueError):
+            limit = 100
+
+        print(f"📋 [InatBox Catalog] Catalog ID: {catalogId}, Search: {searchQuery}, Skip: {skip}, Limit: {limit}")
+
+        # Dev listeler (4K ~18k, list2 ~12k): ilk sayfada (skip=0) doldurulan RAM
+        # cache'ten doğrudan {'metas': dilim} dön — 16 MB'lık yeniden fetch yok.
+        # inat_search (çok katalog tek key) ve GET_CATALOGS hariç. Cache
         # soğuk/expire ise aşağıdaki gerçek-talimat yoluna düşer; processFetchResult
-        # onu yeniden doldurur, sonraki sayfa yine cache-hit alır.
-        if skip > 0 and catalogId != 'inat_search' and catalogId not in self.GET_CATALOGS:
+        # onu yeniden doldurur, sonraki istek yine cache-hit alır.
+        # NOT: limit>100 (toplu senkron) ise skip=0 da cache-hit olabilir.
+        if (skip > 0 or limit > 100) and catalogId != 'inat_search' \
+                and catalogId not in self.GET_CATALOGS:
             cached = _catalog_cache_get(catalogId)
             if cached is not None:
-                print(f"⚡ [InatBox Catalog] cache HIT {catalogId} skip={skip} ({len(cached)} öğe)", flush=True)
+                print(f"⚡ [InatBox Catalog] cache HIT {catalogId} skip={skip} limit={limit} ({len(cached)} öğe)", flush=True)
                 return self._catalog_slice_to_metas(
                     cached,
-                    {'catalogId': catalogId, 'skip': skip, 'searchQuery': searchQuery or ''},
+                    {'catalogId': catalogId, 'skip': skip, 'limit': limit,
+                     'searchQuery': searchQuery or ''},
                     args.get('addonManifestUrl'),
                 )
 
@@ -821,7 +834,7 @@ class InatBoxScraper:
                 'method': 'GET',
                 'headers': self._api_headers(u, '', method='GET'),
                 'metadata': {'catalogId': catalogId, 'aesKey': self.GET_CATALOGS[catalogId],
-                             'skip': skip, 'searchQuery': searchQuery or ''}
+                             'skip': skip, 'limit': limit, 'searchQuery': searchQuery or ''}
             }]}
 
         # InatBox has no server-side search endpoint anymore. "🔍 Tümünde Ara"
@@ -852,7 +865,7 @@ class InatBoxScraper:
                 'headers': self._api_headers(u, requestBody),
                 'body': requestBody,
                 'metadata': {'catalogId': catalogId, 'aesKey': aesKey, 'skip': skip,
-                             'searchQuery': searchQuery or ''}
+                             'limit': limit, 'searchQuery': searchQuery or ''}
             })
 
         return {'instructions': instructions}

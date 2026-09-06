@@ -375,8 +375,15 @@ async def handle_catalog(addon_id: str, request: Request):
         skip = 0
     search = extra.get("search")
     genre = extra.get("genre")
-    # arama/genre canlı kalmalı: search kullanıcıya özel, genre farklı içerik döndürür
-    cacheable = not search and not genre
+    try:
+        req_limit = int(extra.get("limit") or 100)
+    except (TypeError, ValueError):
+        req_limit = 100
+    # arama/genre canlı kalmalı: search kullanıcıya özel, genre farklı içerik döndürür.
+    # limit>100 (toplu senkron): page cache 100'lük dilimlerle anahtarlı — bu isteği
+    # eklentinin kendi cache'ine (InatBox: tüm liste RAM'de) bırak, main.py page
+    # cache'ini baypas et.
+    cacheable = not search and not genre and req_limit <= 100
 
     print(f"\n📋 [{addon_id}] CATALOG instruction request "
           f"(id={cid} skip={skip}{' search' if search else ''}{' genre' if genre else ''})")
