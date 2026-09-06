@@ -15,6 +15,45 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import uvicorn
 
+import catalog_cache
+
+# /api/fetch-result dönüşünde katalog sayfası mı geldiğini anlamak için — eklentiler
+# katalog fetch'lerinde bu purpose'ları kullanıyor (catalog / catalog-search /
+# catalog_search / catalog-search-ajax). __cache anahtarı zaten yalnızca
+# cache'lenebilir (arama/genre olmayan) katalog talimatına enjekte edildiği için
+# bu liste sadece ek güvenlik.
+CATALOG_PURPOSES = (
+    "catalog", "catalog-search", "catalog_search", "catalog-search-ajax", "search",
+)
+
+
+def _native_search_catalog(manifest, type_filter=None):
+    """manifest['catalogs'] içinde extra'da 'search' destekleyen ilk katalogu bul.
+    Flutter StremioAddonCapabilities.parseCatalog ile aynı kurallar: katalog
+    `extra` (list[dict|str]) / `extraSupported` / `extraRequired` biçimleri."""
+    if not isinstance(manifest, dict):
+        return None
+    for cat in manifest.get("catalogs", []) or []:
+        if not isinstance(cat, dict):
+            continue
+        if type_filter and cat.get("type") != type_filter:
+            continue
+        names = set()
+        extra = cat.get("extra")
+        if isinstance(extra, list):
+            for it in extra:
+                if isinstance(it, dict) and it.get("name"):
+                    names.add(it["name"])
+                elif isinstance(it, str):
+                    names.add(it)
+        for k in ("extraSupported", "extraRequired"):
+            v = cat.get(k)
+            if isinstance(v, list):
+                names.update(x for x in v if isinstance(x, str))
+        if "search" in names:
+            return {"type": cat.get("type"), "id": cat.get("id")}
+    return None
+
 # ==========================================
 # 1. KONFİGÜRASYON (Config) YÖNETİMİ
 # ==========================================
@@ -274,6 +313,50 @@ async def get_addon_manifest(addon_id: str):
     return addon.getManifest() if hasattr(addon, 'getManifest') else getattr(addon, 'manifest', {})
 
 # ==========================================
+# 5b. SUNUCU-TARAFLI ARAMA & CACHE ÖZETİ (Faz 2)
+# ==========================================
+
+@app.get("/api/addon/{addon_id}/search")
+async def addon_search(addon_id: str, q: str, type: str | None = None):
+    """Birikmiş katalog metalarında sunucu-taraflı arama. Index soğuksa eklentinin
+    kendi native arama katalogu varsa ona düşer (o da talimat döndürürse boş dön
+    → istemci zaten canlı arayabilir)."""
+    addon = addon_modules.get(addon_id)
+    if not addon:
+        raise HTTPException(status_code=404, detail={"error": "Addon not found"})
+
+    q = (q or "").strip()
+    if len(q) < 2:
+        return {"metas": []}
+
+    hits = catalog_cache.search(addon_id, q, type)
+    if hits:
+        print(f"🔎 [{addon_id}] server search '{q}' → {len(hits)} (index)")
+        return {"metas": hits}
+
+    manifest = addon.getManifest() if hasattr(addon, 'getManifest') else getattr(addon, 'manifest', {})
+    sc = _native_search_catalog(manifest, type)
+    if sc and sc.get("id") and hasattr(addon, 'handleCatalog'):
+        try:
+            res = await addon.handleCatalog({"type": sc.get("type"), "id": sc["id"],
+                                             "extra": {"search": q}})
+            if isinstance(res, dict) and isinstance(res.get("metas"), list):
+                print(f"🔎 [{addon_id}] server search '{q}' → {len(res['metas'])} (native)")
+                return {"metas": res["metas"]}
+        except Exception as e:
+            print(f"⚠️ [{addon_id}] native search failed: {e}")
+    return {"metas": []}
+
+
+@app.get("/api/addon/{addon_id}/catalog-summary")
+async def catalog_summary(addon_id: str):
+    """Bu eklenti için cache'te ne var: katalog başına count / last_crawled / max_skip.
+    İstemci diferansiyel senkron için kullanır."""
+    if addon_id not in addon_modules:
+        raise HTTPException(status_code=404, detail={"error": "Addon not found"})
+    return {"catalogs": catalog_cache.summary(addon_id)}
+
+# ==========================================
 # 6. INSTRUCTION ENDPOINTLERİ (Flutter ile haberleşme)
 # ==========================================
 
@@ -282,16 +365,60 @@ async def handle_catalog(addon_id: str, request: Request):
     addon = addon_modules.get(addon_id)
     if not addon or not hasattr(addon, 'handleCatalog'):
         raise HTTPException(status_code=404, detail={"error": "Addon or method not found"})
-    
+
     body = await request.json()
-    print(f"\n📋 [{addon_id}] CATALOG instruction request")
-    
+    cid = body.get("id")
+    extra = body.get("extra") or {}
     try:
-        result = await addon.handleCatalog(body) # Async varsayıyoruz
-        return result
+        skip = int(extra.get("skip") or 0)
+    except (TypeError, ValueError):
+        skip = 0
+    search = extra.get("search")
+    genre = extra.get("genre")
+    # arama/genre canlı kalmalı: search kullanıcıya özel, genre farklı içerik döndürür
+    cacheable = not search and not genre
+
+    print(f"\n📋 [{addon_id}] CATALOG instruction request "
+          f"(id={cid} skip={skip}{' search' if search else ''}{' genre' if genre else ''})")
+
+    # ── read-through ────────────────────────────────────────────────────────
+    if cacheable:
+        hit = catalog_cache.get_page(addon_id, cid, skip)
+        if hit is not None:
+            print(f"⚡ [{addon_id}] catalog cache HIT {cid} skip={skip} ({len(hit)})")
+            return {"metas": hit}
+
+    try:
+        result = await addon.handleCatalog(body)  # Async varsayıyoruz
     except Exception as e:
         print(f"❌ [{addon_id}] Catalog error: {str(e)}")
         raise HTTPException(status_code=500, detail={"error": str(e)})
+
+    # ── write-through — tamamen best-effort, hata olursa passthrough ─────────
+    try:
+        if cacheable and isinstance(result, dict):
+            metas = result.get("metas")
+            # Boş sayfayı cache'leme: genelde geçici hata / sayfalama sonu —
+            # 6 sa boyunca herkese boş katalog servis etmek istemezsin.
+            if isinstance(metas, list) and metas:
+                catalog_cache.put_page(addon_id, cid, skip, metas)
+                print(f"💾 [{addon_id}] cached (direct) {cid} skip={skip} ({len(metas)})")
+            elif isinstance(result.get("instructions"), list):
+                # Talimat yolu: parse edilmiş metalar /api/fetch-result'ta gelecek —
+                # oraya cache anahtarını taşı. Eklentinin kendi metadata anahtarları
+                # (aesKey, hiddenweb, …) korunur; yalnızca __cache eklenir.
+                for inst in result["instructions"]:
+                    if not isinstance(inst, dict):
+                        continue
+                    md = inst.get("metadata")
+                    if not isinstance(md, dict):
+                        md = {}
+                        inst["metadata"] = md
+                    md["__cache"] = {"addonId": addon_id, "catalogId": cid, "skip": skip}
+    except Exception as e:
+        print(f"⚠️ [{addon_id}] catalog cache layer skipped: {e}")
+
+    return result
 
 @app.post("/api/addon/{addon_id}/meta")
 async def handle_meta(addon_id: str, request: Request):
@@ -364,9 +491,27 @@ async def process_fetch_result(request: Request):
         body['addonManifestUrl'] = addon_manifest_url
         
         result = await addon.processFetchResult(body)
-        
+
         # Extractor mantığı eklenebilir (Node.js'teki videoExtractors)
         # if result.get('ok') is True and purpose.startswith('extract_'): ...
+
+        # ── Faz 2: parse edilmiş katalog sayfasını paylaşımlı cache'e yaz ────
+        # (best-effort — hata olursa eski davranışa dokunma)
+        try:
+            ck = (body.get('metadata') or {}).get('__cache')
+            if ck and isinstance(result, dict) and (
+                purpose in CATALOG_PURPOSES or (purpose or '').startswith('catalog')
+            ):
+                metas = result.get('metas')
+                if isinstance(metas, list) and metas:
+                    catalog_cache.put_page(
+                        ck.get('addonId'), ck.get('catalogId'), ck.get('skip') or 0,
+                        metas, merge=True,
+                    )
+                    print(f"💾 [{ck.get('addonId')}] cached {ck.get('catalogId')} "
+                          f"skip={ck.get('skip')} ({len(metas)})")
+        except Exception as e:
+            print(f"⚠️ [Fetch Result] catalog cache layer skipped: {e}")
 
         print(f"✅ [Fetch Result] Processed successfully")
         return {"success": True, "data": result}
@@ -461,6 +606,33 @@ async def get_admin_stats():
         }
         
     return {"success": True, "stats": stats}
+
+# ── Faz 2: paylaşımlı katalog cache yönetimi ────────────────────────────────
+
+@app.get("/api/admin/cache/stats", dependencies=[Depends(check_auth)])
+async def get_catalog_cache_stats():
+    return {"success": True, "stats": catalog_cache.stats()}
+
+@app.post("/api/admin/cache/clear", dependencies=[Depends(check_auth)])
+async def clear_catalog_cache(request: Request):
+    """Gövde opsiyonel: {"addonId": "...", "catalogId": "..."} ile daraltılabilir;
+    boş gövde tüm cache'i temizler (gün dönümü / manuel)."""
+    body = {}
+    try:
+        body = await request.json()
+    except Exception:
+        pass
+    if not isinstance(body, dict):
+        body = {}
+    addon_id = body.get('addonId')
+    catalog_id = body.get('catalogId')
+    catalog_cache.invalidate(addon_id, catalog_id)
+    return {
+        "success": True,
+        "message": "Katalog cache temizlendi",
+        "scope": {"addonId": addon_id, "catalogId": catalog_id},
+        "stats": catalog_cache.stats(),
+    }
 
 # ==========================================
 # 9. SUNUCUYU BAŞLATMA

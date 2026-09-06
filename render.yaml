@@ -18,3 +18,14 @@ services:
       # dashboard; if left blank the app falls back to addon-config.json.
       - key: ADMIN_PASSWORD
         sync: false
+      # ── Faz 2: paylaşımlı katalog cache (catalog_cache.py) ──
+      # Hepsi opsiyonel; aşağıdaki değerler koddaki varsayılanlar. Free tier
+      # spindown'da RAM cache silinir, ilk istekte yeniden ısınır.
+      # - key: CATALOG_CACHE_TTL          # sayfa TTL (sn), kayan — vars. 21600 (6 sa)
+      #   value: "21600"
+      # - key: CATALOG_CACHE_MAX_PAGES    # LRU tavan — vars. 5000
+      #   value: "5000"
+      # - key: SEARCH_INDEX_MAX_PER_ADDON # arama indeksi üst sınır — vars. 20000
+      #   value: "20000"
+      # - key: REDIS_URL                  # TODO: kalıcı/çok-worker cache (henüz kullanılmıyor)
+      #   sync: false
